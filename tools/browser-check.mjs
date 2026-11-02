@@ -592,6 +592,21 @@ function pageTestScript() {
   step('40GP 满柜：侧放关 → 竖放 7 层 1470 箱', window.CL.app.lastPack.totals.loadedCount === 1470,
     '已装 ' + window.CL.app.lastPack.totals.loadedCount + ' 箱 / ' + window.CL.app.lastPack.layers.length +
     ' 层 / 姿态 ' + window.CL.app.lastPack.layers.map((l) => l.kind).join(','));
+  // 为什么停里「勾选可侧放可到 1610」必须配一键按钮，点了要真的变
+  const sideBtn = $('#result-body .why-btn[data-unlock="side"]');
+  step('为什么停给出「一键允许」按钮', !!sideBtn, sideBtn ? 'ok' : '没有 .why-btn');
+  if (sideBtn) {
+    click(sideBtn);
+    await wait(500);
+    const after = window.CL.app.lastPack.totals.loadedCount;
+    step('一键允许可侧放后 1470 → 1610 箱', after === 1610, '已装 ' + after + ' 箱');
+    step('一键允许把勾选框也打上了', !!document.querySelector('.opt-side') && document.querySelector('.opt-side').checked,
+      '侧放勾选 ' + (document.querySelector('.opt-side') || {}).checked);
+    click($('.opt-side', cards()[0]));
+    window.CL.app.state.rows[0].allowSide = false;
+    await calc();
+    await wait(200);
+  }
   // 勾上「可侧放」后方案才能用侧放姿态：1470 → 1610
   const side40 = $('.opt-side', cards()[0]);
   if (side40) {

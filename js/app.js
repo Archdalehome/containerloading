@@ -211,6 +211,40 @@
       }
     });
 
+    /**
+     * 「为什么停」里的「一键允许并重算」：把某个姿态/填缝开关全部打开再算一遍。
+     * 一定要用户自己点——把货翻过来放是现场要照着装的，不能默认替他决定。
+     */
+    function applyUnlock(kind) {
+      if (kind === 'side') {
+        state.rows.forEach(function (r) { r.allowSide = true; });
+      } else if (kind === 'flip') {
+        // 矩形箱倒放没有收益，只给斜顶/L 形打开；对扣上件仍然必须是倒放
+        state.rows.forEach(function (r) { if (r.shape !== 'rect') r.allowFlip = true; });
+      } else if (kind === 'fill') {
+        state.options.allowFill = true;
+        var fillEl = document.getElementById('allow-fill');
+        if (fillEl) fillEl.checked = true;
+      } else if (kind === 'dunnage') {
+        state.options.allowDunnage = true;
+        var dEl = document.getElementById('allow-dunnage');
+        if (dEl) dEl.checked = true;
+      } else {
+        return;
+      }
+      ST.save(state);
+      rowsUI.renderAll();
+      document.getElementById('calc-btn').click();
+    }
+
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var btn = t.closest('.why-btn');
+      if (!btn) return;
+      applyUnlock(btn.dataset.unlock);
+    });
+
     var layerSelect = document.getElementById('layer-select');
     if (layerSelect) {
       layerSelect.addEventListener('change', function (e) {

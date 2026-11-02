@@ -92,8 +92,11 @@
     if (unlocks.length) {
       html += '<p class="why-unlock">想再装：' + unlocks.map(function (u) {
         return '<span class="why-chip' + (u.gated ? ' gated' : '') + '">' + esc(u.label) +
-          ' → <b>' + u.boxes.toLocaleString('zh-CN') + ' 箱</b>（+' + u.delta + '）<small>' + esc(u.note) + '</small></span>';
+          ' → <b>' + u.boxes.toLocaleString('zh-CN') + ' 箱</b>（+' + u.delta + '）<small>' + esc(u.note) + '</small>' +
+          '<button type="button" class="why-btn" data-unlock="' + esc(u.key) + '">一键允许并重算</button></span>';
       }).join('') + '</p>';
+      html += '<p class="why-hint">「一键允许」会把这个开关打给所有箱型再重算——翻过来放的货现场要照着装，' +
+        '有「此面向上」标识的别点。</p>';
     }
     html += '</div>';
     return html;
