@@ -587,5 +587,16 @@ test('5000 箱输入：枚举完成且 ≤ 2 秒', () => {
   console.log('      5000 箱 × ' + ps.compared + ' 方案耗时 ' + ms + ' ms');
 });
 
+test('垫块关时：需要垫块的方案不充当最优，但要标出来', () => {
+  const l = [row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '', 'lshape')];
+  const off = P.runPlans(state(C.get('40HQ'), l, false));
+  assert.strictEqual(off.best.boxes, 100, '垫块关时最优不能是垫块方案');
+  assert.ok(off.bestGated && off.bestGated.boxes === 500, '应保留带前提的 500 箱方案');
+  assert.ok(off.bestGated.dunnageBlocks > 0);
+  const on = P.runPlans({ container: C.get('40HQ'), rows: l, options: { allowDunnage: true } });
+  assert.strictEqual(on.best.boxes, 500, '打开垫块后 500 可作最优');
+  assert.strictEqual(on.plans.filter((p) => p.gated).length, 0);
+});
+
 console.log('\n' + passed + ' 通过，' + failures.length + ' 失败\n');
 if (failures.length) process.exit(1);

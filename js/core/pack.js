@@ -1168,6 +1168,9 @@
       });
       var errs = validatePhysics(pack);
       var cog = cogOf(pack);
+      var dunnageBlocks = (pack.dunnage || []).length;
+      // 需要垫块的方案：用户没打开垫块开关时，不能自动充当「最优」
+      var gated = dunnageBlocks > 0 && !(state.options && state.options.allowDunnage);
       plans.push({
         config: cfg,
         pack: pack,
@@ -1176,15 +1179,21 @@
         boxes: pack.totals.loadedCount,
         net: pack.totals.netVolume,
         fillRate: pack.totals.fillRate,
-        cog: cog
+        cog: cog,
+        dunnageBlocks: dunnageBlocks,
+        gated: gated
       });
     });
 
     var valid = plans.filter(function (p) { return p.valid; }).sort(rankCompare);
+    var eligible = valid.filter(function (p) { return !p.gated; });
+    var bestGated = valid.filter(function (p) { return p.gated; })[0] || null;
     return {
       plans: plans,
       ranked: valid,
-      best: valid[0] || null,
+      best: eligible[0] || valid[0] || null,
+      bestEligible: eligible[0] || null,
+      bestGated: bestGated,
       compared: plans.length,
       limit: limit
     };

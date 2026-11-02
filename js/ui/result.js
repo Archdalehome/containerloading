@@ -78,14 +78,22 @@
       });
       html += '<div class="plans"><p class="plans-title">已比较 <b>' + ps.compared + '</b> 种方案，最优 <b>' +
         (ps.best ? ps.best.boxes : 0) + '</b> 箱' +
-        (ps.best ? '（' + esc(ps.best.config.label) + '）' : '') + '</p><div class="plan-list">';
+        (ps.best ? '（' + esc(ps.best.config.label) + '）' : '') + '</p>';
+      if (ps.bestGated && (!ps.best || ps.bestGated.boxes > ps.best.boxes)) {
+        html += '<p class="plans-gated">另有方案可装 <b>' + ps.bestGated.boxes +
+          '</b> 箱，但需要自行准备 <b>' + ps.bestGated.dunnageBlocks +
+          '</b> 块垫块（非货品）；勾选「用垫块填平 L 形缺口」后才会作为最优方案。</p>';
+      }
+      html += '<div class="plan-list">';
       sortedPlans.forEach(function (p, idx) {
         var cls = 'plan-chip' + (idx < 3 ? ' top' : '') + (p.valid ? '' : ' invalid') +
-          (pack === p.pack ? ' active' : '');
+          (p.gated ? ' gated' : '') + (pack === p.pack ? ' active' : '');
+        var extra = p.gated ? ' · 需 ' + p.dunnageBlocks + ' 块垫块' : '';
         html += '<button type="button" class="' + cls + '" data-plan="' + p.config.id + '" title="' +
-          esc(p.config.label) + '">#' + p.config.id + ' ' + p.boxes + ' 箱' + (p.valid ? '' : ' ✗') + '</button>';
+          esc(p.config.label + (p.gated ? '（需自行准备垫块）' : '')) + '">#' + p.config.id + ' ' +
+          p.boxes + ' 箱' + (p.valid ? '' : ' ✗') + extra + '</button>';
       });
-      html += '</div><p class="plans-sub">按箱数排名：箱数 → 重心横向偏移 → 净体积；同类方案里只有合法排布参与排名。前 3 名可点击切换 3D。</p></div>';
+      html += '</div><p class="plans-sub">按箱数排名：箱数 → 重心横向偏移 → 净体积；只有合法排布参与排名。方案条前 3 名可点击切换 3D；带「需 N 块垫块」的方案要先准备垫块或配箱。</p></div>';
     }
 
     html += '<div class="metrics">' +
