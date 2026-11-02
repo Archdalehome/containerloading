@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>L 形对扣对照图</title>
+<style>
+  body { margin: 0; background: #f7f9fc; font-family: "Microsoft YaHei", system-ui, sans-serif; color: #1f2a37; }
+  .wrap { display: flex; gap: 16px; padding: 16px; }
+  .fig { flex: 1; background: #fff; border: 1px solid #dfe6ef; border-radius: 12px; overflow: hidden; }
+  .fig h2 { font-size: 15px; margin: 12px 16px 2px; }
+  .fig p { font-size: 12.5px; color: #5b6878; margin: 0 16px 8px; line-height: 1.6; min-height: 34px; }
+  canvas { display: block; width: 100%; height: 520px; }
+  .tag { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 999px; margin-right: 6px; }
+  .tag.red { background: #fdecea; color: #b3261e; border: 1px solid #f3c2bd; }
+  .tag.gray { background: #eef2f7; color: #5b6878; border: 1px solid #dbe3ec; }
+  .tag.blue { background: #eef4ff; color: #2f5fa8; border: 1px solid #cfdffa; }
+  .tag.green { background: #eefbf4; color: #1d7a46; border: 1px solid #c6ecd6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="fig">
+    <h2>对称台阶 200 / 200 · 对扣成功</h2>
+    <p><span class="tag blue">下件正放</span><span class="tag green">上件倒放</span>
+      两只拼成 <b>600 × 400 × 800</b> 实心块，顶面平坦，可以继续往上叠。</p>
+    <canvas id="cA"></canvas>
+  </div>
+  <div class="fig">
+    <h2>不对称台阶 160 / 240 · 强行对扣 = 互相插入</h2>
+    <p><span class="tag red">红色 = 实体重叠区</span>
+      每对箱重叠 <b>80 × 200 × 600 mm</b>（0.0096 m³），现场塞不进去，引擎直接判为不可对扣。</p>
+    <canvas id="cB"></canvas>
+  </div>
+</div>
+<script src="../js/core/solid.js"></script>
+<script type="module">
+import * as THREE from '../vendor/three.module.min.js';
+
+const SV_SYM = { l: 600, w: 400, h: 500, wlow: 200, whigh: 200, hlow: 300, hhigh: 500 };
+const SV_ASYM = { l: 600, w: 400, h: 500, wlow: 160, whigh: 240, hlow: 300, hhigh: 500 };
+const GAP = 4; // 与页面上一样的视觉缝，便于看清两只箱子
+
+function setup(canvas) {
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true });
+  r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const rect = canvas.getBoundingClientRect();
+  r.setSize(rect.width, rect.height, false);
+  r.setClearColor(0xf7f9fc, 1);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xc9d4e2, 1.15));
+  const d1 = new THREE.DirectionalLight(0xffffff, 0.8); d1.position.set(1, 2, 1.6); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0xffffff, 0.35); d2.position.set(-1.4, 1, -1.2); scene.add(d2);
+  const cam = new THREE.PerspectiveCamera(32, rect.width / rect.height, 1, 100000);
+  return { r, scene, cam };
+}
+
+// 容器坐标（x 长, y 深, z 高）→ three（X 长, Y 高, Z 深）
+const toWorld = (x, y, z) => new THREE.Vector3(x - 300, z, y - 200);
+
+/** 与 js/ui/viewer.js 的 lshapeGeometry 一致：低段 L×H低×W低 在前，高段 L×H高×W高 在后 */
+function addL(scene, sv, flipped, z, color, opacity) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshLambertMaterial({
+    color, transparent: opacity < 1, opacity, depthWrite: opacity >= 1
+  });
+  const shape = (w, h, d, ty, tz) => {
+    const g = new THREE.BoxGeometry(sv.l - GAP, h - GAP, d - GAP);
+    g.translate(0, ty, tz);
+    return g;
+  };
+  // 低段：高度 H低，贴底，深度 0..W低（容器深度从 0 起 = three z 从 -W/2 起）
+  const low = new THREE.Mesh(
+    shape(sv.wlow, sv.hlow, sv.wlow, sv.hlow / 2 - sv.h / 2, -sv.w / 2 + sv.wlow / 2), mat);
+  // 高段：高度 H高，贴底，深度 W低..W
+  const highG = new THREE.BoxGeometry(sv.l - GAP, sv.h - GAP, sv.whigh - GAP);
+  highG.translate(0, -sv.h / 2 + sv.h / 2, 0); // 居中：底面贴 0
+  const high = new THREE.Mesh(highG, mat);
+  high.position.set(0, (sv.h / 2) - sv.h / 2, sv.w / 2 - sv.whigh / 2);
+  group.add(low, high);
+
+  group.traverse((o) => {
+    if (!o.isMesh) return;
+    const eg = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 10),
+      new THREE.LineBasicMaterial({ color: 0x24384f, transparent: true, opacity: 0.55 }));
+    eg.position.copy(o.position);
+    group.add(eg);
+  });
+
+  if (flipped) group.scale.set(1, -1, -1); // 容器里对扣上件是 y→-y、z→-z（镜像深度 + 倒放）
+  group.position.copy(toWorld(sv.l / 2, sv.w / 2, z + sv.h / 2));
+  scene.add(group);
+  return group;
+}
+
+/** 用 solid.js 采样两只箱子的实体重叠区 */
+function overlapBox(sv, zUpper) {
+  const item = { shape: 'lshape', shapeValues: sv, bbox: { l: sv.l, w: sv.w, h: sv.h } };
+  const lower = { x: 0, y: 0, z: 0, l: sv.l, w: sv.w, h: sv.h, pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] };
+  const upper = { x: 0, y: 0, z: zUpper, l: sv.l, w: sv.w, h: sv.h, pose: [1, 0, 0, 0, -1, 0, 0, 0, -1] };
+  const S = window.CL.solid;
+  let minY = 1e9, maxY = -1e9, minZ = 1e9, maxZ = -1e9, depth = 0;
+  for (let y = 0; y <= sv.w; y += 2) {
+    for (let z = 0; z <= 820; z += 2) {
+      const a = S.spanAt(lower, item, 300, y);
+      const b = S.spanAt(upper, item, 300, y);
+      if (!a || !b) continue;
+      if (z < Math.max(a[0], b[0]) || z > Math.min(a[1], b[1])) continue;
+      const ov = Math.min(a[1], b[1]) - Math.max(a[0], b[0]);
+      if (ov > 1) {
+        depth = Math.max(depth, ov);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+      }
+    }
+  }
+  if (depth <= 0) return null;
+  return { y0: minY, y1: maxY, z0: minZ, z1: maxZ, depth };
+}
+
+const A = setup(document.getElementById('cA'));
+const B = setup(document.getElementById('cB'));
+
+addL(A.scene, SV_SYM, false, 0, 0x5b8ff9, 0.62);
+addL(A.scene, SV_SYM, true, 300, 0x61d9a4, 0.62);
+
+addL(B.scene, SV_ASYM, false, 0, 0x5b8ff9, 0.30);
+addL(B.scene, SV_ASYM, true, 300, 0x61d9a4, 0.30);
+const ov = overlapBox(SV_ASYM, 300);
+if (ov) {
+  const w = ov.y1 - ov.y0;
+  const h = ov.z1 - ov.z0;
+  const geo = new THREE.BoxGeometry(596, h, w);
+  const red = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0xd93025, transparent: true, opacity: 0.85 }));
+  red.position.copy(toWorld(300, (ov.y0 + ov.y1) / 2, (ov.z0 + ov.z1) / 2));
+  B.scene.add(red);
+  const re = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x8c1d18 }));
+  re.position.copy(red.position);
+  B.scene.add(re);
+  window.__overlap = { w: w, h: h, y0: ov.y0, y1: ov.y1, z0: ov.z0, z1: ov.z1, depth: ov.depth };
+}
+
+A.cam.position.set(1550, 1150, 1350);
+A.cam.lookAt(0, 380, 0);
+B.cam.position.set(1550, 1150, 1350);
+B.cam.lookAt(0, 380, 0);
+A.r.render(A.scene, A.cam);
+B.r.render(B.scene, B.cam);
+window.__pairFigsReady = true;
+</script>
+</body>
+</html>
