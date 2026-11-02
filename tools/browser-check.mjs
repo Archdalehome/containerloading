@@ -181,7 +181,29 @@ function pageTestScript() {
   step('体积装载率 79.2%', bigText.includes('79.2%'), bigText.slice(0, 160));
   step('用高 2400 mm', bigText.includes('用高 2400'));
 
-  // 9. 装不完时要说清原因
+  // 9. 3D 图
+  await wait(400);
+  const gl = $('#viewer-canvas canvas');
+  step('3D 画布已创建', !!gl && gl.width > 0 && gl.height > 0, gl ? gl.width + '×' + gl.height : '无 canvas');
+  step('3D 卡片可见', !$('#viewer-card').classList.contains('hidden'));
+  const sel = $('#layer-select');
+  step('层选择器 9 项', sel && sel.options.length === 9, sel ? sel.options.length : '无选择器');
+  if (sel) {
+    sel.value = '3';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await wait(150);
+    const visCount = window.CL3D._state.meshes.filter((m) => m.visible)
+      .reduce((s, m) => s + m.count, 0);
+    step('只看第 3 层是 210 箱', window.CL3D._state.layer === 3 && visCount === 210, '可见 ' + visCount + ' 箱');
+    sel.value = '0';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await wait(100);
+  }
+  step('图例 1 个箱型', $$('#viewer-legend .legend-item').length === 1, $$('#viewer-legend .legend-item').length);
+  const dims = $$('#viewer-canvas .dim-label').map((d) => d.textContent).join('|');
+  step('尺寸标注齐全', dims.includes('12032') && dims.includes('2352') && dims.includes('2698') && dims.includes('柜门'), dims);
+
+  // 10. 装不完时要说清原因
   setVal($('.qty-input', cards()[0]), '2000');
   await calc();
   step('装不完显示部分装载', $('#result-card').classList.contains('is-partial'), $('#result-title').textContent);
@@ -242,15 +264,166 @@ try {
     .map((e) => e.params.exceptionDetails.exception?.description || e.params.exceptionDetails.text);
   const consoleErrors = cdp.events
     .filter((e) => e.method === 'Log.entryAdded' && e.params.entry.level === 'error' && !/favicon/i.test(e.params.entry.text))
-    .map((e) => e.params.entry.text);
+    // 本地 http.server 在页面重载瞬间偶尔拒连，属测试环境噪声，不是页面错误
+    .filter((e) => !(BASE.includes('127.0.0.1') && /ERR_CONNECTION_REFUSED/.test(e.params.entry.text)))
+    .map((e) => (e.params.entry.url ? e.params.entry.url + ' — ' : '') + e.params.entry.text);
 
-  console.log('\n浏览器交互自检：');
   let failed = 0;
   for (const s of result.steps) {
     if (!s.ok) failed++;
+  }
+
+  // 截图（整页）——此时页面停在 1680 箱的结果上
+  const metrics = await cdp.send('Page.getLayoutMetrics');
+  const height = Math.min(Math.ceil(metrics.cssContentSize.height), 4000);
+  const shot = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+    clip: { x: 0, y: 0, width: WIDTH, height, scale: 1 }
+  });
+  fs.writeFileSync(OUT_PNG, Buffer.from(shot.data, 'base64'));
+
+  const mixed = await cdp.evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const $ = (s) => document.querySelector(s);
+    const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+    const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const setVal = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    while ($$('.sku-card').length > 1) { click($$('.sku-card')[$$('.sku-card').length - 1].querySelector('[data-act="delete"]')); await wait(30); }
+    const cardById = (id) => document.querySelector('.sku-card[data-id="' + id + '"]');
+    const c0 = $$('.sku-card')[0];
+    setVal(c0.querySelector('.v-input[data-key="L"]'), '400');
+    setVal(c0.querySelector('.v-input[data-key="W"]'), '300');
+    setVal(c0.querySelector('.v-input[data-key="H"]'), '300');
+    setVal(c0.querySelector('.qty-input'), '30');
+    setVal(c0.querySelector('.weight-input'), '8');
+    click($('#add-sku')); await wait(50);
+    let c1 = $$('.sku-card')[1];
+    const id1 = c1.dataset.id;
+    click(c1.querySelector('.shape-tab[data-shape="lshape"]')); await wait(60);
+    c1 = cardById(id1);
+    setVal(c1.querySelector('.v-input[data-key="L"]'), '600');
+    setVal(c1.querySelector('.v-input[data-key="W"]'), '400');
+    setVal(c1.querySelector('.v-input[data-key="Wlow"]'), '160');
+    setVal(c1.querySelector('.v-input[data-key="Whigh"]'), '240');
+    setVal(c1.querySelector('.v-input[data-key="Hlow"]'), '300');
+    setVal(c1.querySelector('.v-input[data-key="Hhigh"]'), '500');
+    setVal(c1.querySelector('.qty-input'), '20');
+    setVal(c1.querySelector('.weight-input'), '9');
+    click($('#add-sku')); await wait(50);
+    let c2 = $$('.sku-card')[2];
+    const id2 = c2.dataset.id;
+    click(c2.querySelector('.shape-tab[data-shape="slope"]')); await wait(60);
+    c2 = cardById(id2);
+    setVal(c2.querySelector('.v-input[data-key="L"]'), '600');
+    setVal(c2.querySelector('.v-input[data-key="W"]'), '400');
+    setVal(c2.querySelector('.v-input[data-key="Hlow"]'), '300');
+    setVal(c2.querySelector('.v-input[data-key="Hhigh"]'), '500');
+    setVal(c2.querySelector('.qty-input'), '12');
+    setVal(c2.querySelector('.weight-input'), '10');
+    click($('#calc-btn'));
+    await wait(900);
+    if (window.CL3D) window.CL3D.setView({ theta: 1.02, phi: 1.1, radius: 7000 });
+    await wait(300);
+    // 顺便量一下几何：L 形前段应明显低于后段，斜顶前端应明显低于后端
+    const geoStats = (() => {
+      const state = window.CL3D._state;
+      const items = state.pack.items;
+      const findMesh = (shape) => state.meshes.find((m) => {
+        const it = items.find((i) => i.id === m.userData.skuId);
+        return it && it.shape === shape;
+      });
+      const stat = (shape) => {
+        const mesh = findMesh(shape);
+        if (!mesh) return null;
+        const pos = mesh.geometry.attributes.position;
+        let lFront = -1e9, lBack = -1e9, sLow = -1e9, sHigh = -1e9;
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+          if (z < -50) lFront = Math.max(lFront, y);
+          if (z > 0) lBack = Math.max(lBack, y);
+          if (x < -100) sLow = Math.max(sLow, y);
+          if (x > 100) sHigh = Math.max(sHigh, y);
+        }
+        return { lFront, lBack, sLow, sHigh };
+      };
+      return stat('lshape');
+    })();
+    const slopeStats = (() => {
+      const state = window.CL3D._state;
+      const items = state.pack.items;
+      const mesh = state.meshes.find((m) => {
+        const it = items.find((i) => i.id === m.userData.skuId);
+        return it && it.shape === 'slope';
+      });
+      if (!mesh) return null;
+      const pos = mesh.geometry.attributes.position;
+      let low = -1e9, high = -1e9;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), y = pos.getY(i);
+        if (x < -100) low = Math.max(low, y);
+        if (x > 100) high = Math.max(high, y);
+      }
+      return { low, high };
+    })();
+    const r = document.getElementById('viewer-card').getBoundingClientRect();
+    return {
+      x: Math.round(r.left + window.scrollX),
+      y: Math.round(r.top + window.scrollY),
+      width: Math.round(r.width),
+      height: Math.round(r.height),
+      lshape: geoStats,
+      slope: slopeStats
+    };
+  })()`);
+
+  let geomOk = { lshape: false, slope: false };
+  if (mixed) {
+    const shot2 = await cdp.send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      clip: { x: mixed.x, y: mixed.y, width: mixed.width, height: mixed.height, scale: 1 }
+    });
+    const out2 = OUT_PNG.replace('.png', '-mixed.png');
+    fs.writeFileSync(out2, Buffer.from(shot2.data, 'base64'));
+
+    // 几何校验：非矩形箱必须是真实形状，不能退化成外接长方体
+    geomOk.lshape = !!(mixed.lshape && (mixed.lshape.lBack - mixed.lshape.lFront) > 100);
+    geomOk.slope = !!(mixed.slope && (mixed.slope.high - mixed.slope.low) > 100);
+
+    // 换一个高一点的视角，看清台阶与斜面
+    await cdp.evaluate("window.CL3D.setView({ theta: 0.72, phi: 0.88, radius: 4600 }); true");
+    await sleep(400);
+    const shot3 = await cdp.send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      clip: { x: mixed.x, y: mixed.y, width: mixed.width, height: mixed.height, scale: 1 }
+    });
+    const out3 = OUT_PNG.replace('.png', '-mixed2.png');
+    fs.writeFileSync(out3, Buffer.from(shot3.data, 'base64'));
+    console.log('  3D 截图：' + OUT_PNG + ' / ' + out2 + ' / ' + out3);
+  } else {
+    failed++;
+  }
+
+  // 汇总
+  const stepFailed = result.steps.filter((s) => !s.ok).length;
+  const geomFailed = (geomOk.lshape ? 0 : 1) + (geomOk.slope ? 0 : 1);
+  failed = stepFailed + geomFailed;
+
+  console.log('\n浏览器交互自检：');
+  for (const s of result.steps) {
     console.log('  ' + (s.ok ? 'ok  ' : 'FAIL') + ' ' + s.name + (s.ok ? '' : '  ← ' + s.detail));
   }
-  console.log('\n  ' + (result.steps.length - failed) + ' 通过，' + failed + ' 失败');
+  console.log('\n3D 真实几何：');
+  console.log('  ' + (geomOk.lshape ? 'ok  ' : 'FAIL') + ' L 形台阶前段最高 ' +
+    (mixed && mixed.lshape ? mixed.lshape.lFront.toFixed(1) : '?') + ' mm，后段最高 ' +
+    (mixed && mixed.lshape ? mixed.lshape.lBack.toFixed(1) : '?') + ' mm');
+  console.log('  ' + (geomOk.slope ? 'ok  ' : 'FAIL') + ' 斜顶前端最高 ' +
+    (mixed && mixed.slope ? mixed.slope.low.toFixed(1) : '?') + ' mm，后端最高 ' +
+    (mixed && mixed.slope ? mixed.slope.high.toFixed(1) : '?') + ' mm');
+  console.log('\n  ' + (result.steps.length - stepFailed) + ' 项交互通过，' + stepFailed + ' 失败；' +
+    (2 - geomFailed) + ' 项几何通过，' + geomFailed + ' 失败');
 
   if (jsErrors.length) {
     console.log('\n页面 JS 异常：');
@@ -260,17 +433,6 @@ try {
     console.log('\n控制台 error：');
     consoleErrors.forEach((e) => console.log('  ' + e));
   }
-
-  // 截图（整页）
-  const metrics = await cdp.send('Page.getLayoutMetrics');
-  const height = Math.min(Math.ceil(metrics.cssContentSize.height), 4000);
-  const shot = await cdp.send('Page.captureScreenshot', {
-    format: 'png',
-    captureBeyondViewport: true,
-    clip: { x: 0, y: 0, width: WIDTH, height, scale: 1 }
-  });
-  fs.writeFileSync(OUT_PNG, Buffer.from(shot.data, 'base64'));
-  console.log('\n  截图：' + OUT_PNG);
 
   if (failed || jsErrors.length) exitCode = 1;
 } catch (e) {

@@ -531,6 +531,97 @@ input[type=number]::-webkit-inner-spin-button { margin-left: 2px; }
 .err-group ul { margin: 0; padding-left: 18px; }
 .err-group li { font-size: 13px; color: var(--ink2); margin: 2px 0; }
 
+/* ---------- 3D 装柜图 ---------- */
+.viewer-canvas {
+  position: relative;
+  height: 520px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f7f9fc;
+  touch-action: none;
+}
+
+.viewer-gl { display: block; width: 100%; height: 100%; }
+
+.viewer-error {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+  color: var(--ink2);
+  font-size: 13px;
+  text-align: center;
+  line-height: 1.7;
+}
+
+.dim-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: #41546b;
+  background: rgba(255, 255, 255, .85);
+  border: 1px solid rgba(148, 163, 184, .35);
+  padding: 4px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity .12s;
+}
+.dim-label.dim-l { color: #2d4a72; }
+.dim-label.dim-door { color: var(--accent); font-weight: 600; }
+
+.viewer-tools { display: flex; gap: 10px; align-items: center; }
+.tool { font-size: 12px; color: var(--ink2); display: inline-flex; gap: 6px; align-items: center; }
+.tool select {
+  height: 32px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.legend:empty { display: none; }
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 5px 12px 5px 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+  transition: border-color .15s, background .15s;
+}
+.legend-item i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+.legend-item .legend-count { color: var(--ink3); font-size: 11.5px; }
+.legend-item:hover { border-color: var(--line-strong); }
+.legend-item.active { border-color: var(--accent); background: var(--accent-soft); }
+
+.viewer-foot {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink3);
+  line-height: 1.6;
+}
+
 /* ---------- 页脚 ---------- */
 .foot {
   display: flex;
@@ -554,4 +645,6 @@ input[type=number]::-webkit-inner-spin-button { margin-left: 2px; }
   .field.mini { flex: 1; width: auto; }
   .actions-hint { display: block; }
   .btn.calc { width: 100%; }
+  .viewer-canvas { height: 340px; }
+  .card-head { align-items: flex-start; }
 }

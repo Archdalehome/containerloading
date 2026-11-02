@@ -119,6 +119,41 @@
       CL.ui.result.markStale();
     });
 
+    var pendingPack = null;
+
+    function showViewer(pack) {
+      var card = document.getElementById('viewer-card');
+      var host = document.getElementById('viewer-canvas');
+      card.classList.remove('hidden');
+      if (!root.CL3D) {
+        // viewer.js 是 module，正常会在 DOMContentLoaded 之前执行完；没加载成功时给个说明
+        host.innerHTML = '<div class="viewer-error">3D 模块没有加载成功，刷新页面再试。</div>';
+        return;
+      }
+      if (!root.CL3D.isReady() && !root.CL3D.init(host)) return;
+      root.CL3D.build(pack);
+    }
+
+    function hideViewer() {
+      document.getElementById('viewer-card').classList.add('hidden');
+      pendingPack = null;
+    }
+
+    root.addEventListener('cl3d-ready', function () {
+      if (!pendingPack) return;
+      var p = pendingPack;
+      pendingPack = null;
+      var host = document.getElementById('viewer-canvas');
+      if (root.CL3D.init(host)) root.CL3D.build(p);
+    });
+
+    var layerSelect = document.getElementById('layer-select');
+    if (layerSelect) {
+      layerSelect.addEventListener('change', function (e) {
+        if (root.CL3D) root.CL3D.setLayer(e.target.value);
+      });
+    }
+
     document.getElementById('calc-btn').addEventListener('click', function () {
       state.showErrors = true;
       panel.paintErrors();
@@ -127,6 +162,9 @@
       var res = V.all(state);
       var pack = res.ok ? CL.pack.run(state) : null;
       CL.ui.result.render(res, pack, state);
+
+      if (pack) showViewer(pack);
+      else hideViewer();
 
       var card = document.getElementById('result-card');
       card.scrollIntoView({ behavior: 'smooth', block: 'start' });

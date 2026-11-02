@@ -97,8 +97,26 @@
     <div id="result-body"></div>
   </section>
 
+  <!-- 3D 装柜图 -->
+  <section class="card hidden" id="viewer-card">
+    <div class="card-head">
+      <h2><span class="step">4</span>3D 装柜图</h2>
+      <div class="viewer-tools">
+        <label class="tool">显示
+          <select id="layer-select" aria-label="选择显示哪一层"></select>
+        </label>
+      </div>
+    </div>
+    <div class="viewer-canvas" id="viewer-canvas"></div>
+    <div class="legend" id="viewer-legend"></div>
+    <div class="viewer-foot">
+      拖动旋转 · 滚轮缩放 · 右键拖动平移 · 点图例可高亮某个箱型。
+      L形箱 / 斜顶箱按真实几何渲染；排布位置仍是外接长方体口径（两者不一致的地方就是保守留空）。
+    </div>
+  </section>
+
   <footer class="foot">
-    <span>装柜计算器 · M2 分层排布</span>
+    <span>装柜计算器 · M3 3D 装柜图</span>
     <span>内部计算一律毫米；显示时换算为米 / 立方米。</span>
   </footer>
 </div>
@@ -112,5 +130,6 @@
 <script src="js/ui/sku-rows.js"></script>
 <script src="js/ui/result.js"></script>
 <script src="js/app.js"></script>
+<script type="module" src="js/ui/viewer.js"></script>
 </body>
 </html>

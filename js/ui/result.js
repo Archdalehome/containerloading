@@ -26,7 +26,7 @@
   }
 
   function nameOf(item) {
-    return item.name ? item.name : '（未命名）';
+    return item.name ? item.name : item.shapeName + ' #' + (item.index + 1);
   }
 
   function renderErrors(res, state) {
@@ -126,10 +126,12 @@
       '<th>层</th><th>箱型</th><th>名称</th><th>本层箱数</th><th>单层容量</th><th>层高 (mm)</th><th>层顶高度 (mm)</th><th>朝向</th>' +
       '</tr></thead><tbody>';
     pack.layers.forEach(function (L) {
+      var item = null;
+      pack.items.forEach(function (it) { if (it.id === L.skuId) item = it; });
       html += '<tr>' +
         '<td class="num">' + (L.index + 1) + '</td>' +
         '<td>' + esc(L.shapeName) + '</td>' +
-        '<td>' + esc(L.skuName ? L.skuName : '（未命名）') + '</td>' +
+        '<td>' + esc(item ? nameOf(item) : (L.skuName || '—')) + '</td>' +
         '<td class="num mono">' + L.count + '</td>' +
         '<td class="num mono">' + L.capacity + '</td>' +
         '<td class="num mono">' + S.num(L.height) + '</td>' +

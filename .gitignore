@@ -2,6 +2,7 @@
 .tmp-*/
 .tmp-*
 tools/screenshot.png
+tools/screenshot-*.png
 *.log
 
 # 系统文件

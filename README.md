@@ -7,8 +7,8 @@
 
 - **M1 骨架与校验：完成** — 三种箱型表单、集装箱规格（可改）、完整参数校验、本地保存
 - **M2 排布算法与指标：完成** — 分层装载、每 SKU 装载/剩余、体积装载率、总重与超载、分层明细
-- M3 3D 装柜图：未开始
-- M4 层切换 / 图例 / 导出 / 说明：未开始
+- **M3 3D 装柜图：完成** — three.js 本地 vendor，拖动旋转 / 滚轮缩放、按层筛选、图例高亮、尺寸标注
+- M4 层切换强化 / 导出装柜清单 / 使用说明：未开始
 
 线上地址：https://containerloading.pages.dev （push main 自动部署）
 
@@ -27,7 +27,7 @@ python -m http.server 8080
 ```bash
 node tests/core.test.js          # 表单/几何/校验（17 项）
 node tests/pack.test.js          # 排布算法：1680 基准 + 随机 200 组不越界不重叠（13 项）
-node tools/browser-check.mjs     # 真实浏览器点击测试（30 项）+ 截图，需先起本地服务
+node tools/browser-check.mjs     # 真实浏览器点击测试（36 项）+ 2 项 3D 几何 + 截图，需先起本地服务
 CHECK_WIDTH=390 node tools/browser-check.mjs   # 手机宽度再跑一遍
 ```
 
@@ -44,6 +44,8 @@ js/core/containers.js      集装箱内置规格
 js/core/validate.js        校验与整单汇总（纯函数）
 js/core/pack.js            分层装载算法（纯函数，返回每箱坐标）
 js/core/storage.js         localStorage 保存
+js/ui/viewer.js            3D 装柜图（three.js，ES module）
+vendor/three.module.min.js three.js 本地文件（不走 CDN）
 js/core/init.js            Node 端模块装配（自检用）
 js/ui/container-panel.js   集装箱规格面板
 js/ui/sku-rows.js          纸箱清单（加行、删行、切形状、实时摘要）
@@ -52,6 +54,8 @@ js/app.js                  入口与事件接线
 tests/core.test.js         表单与校验自检
 tests/pack.test.js         排布算法自检
 tools/browser-check.mjs    浏览器交互自检
+tools/verify-live.py       线上验收（走 SOCKS5 + OpenSSL）
+tools/fetch-vendor.py      下载 vendor 依赖
 carton-shape/              三种箱型参考图（仅作说明，页面不引用）
 ```
 
@@ -95,4 +99,14 @@ L 形箱与斜顶箱的**净体积**按真实几何计算，但**排布**一律�
 - 一层只放一个 SKU，层内放不满的剩余空间不用其他 SKU 补位
 - 不做形状咬合 / 翻转嵌套，L 形箱与斜顶箱一律按外接长方体占位
 - 单次计算上限 50000 箱，超出会截断并提示
+
+## 3D（js/ui/viewer.js）
+
+- three.js 0.160.0 的 module 版放在 `vendor/`，`index.html` 用 `<script type="module">` 引入，没有任何 CDN 请求。
+- 坐标：three.X = 柜长、three.Y = 高、three.Z = 柜宽；场景把柜子居中，轨道相机绕柜心转。
+- 箱体几何：矩形是 BoxGeometry；L 形箱按「前段低、后段高」两段拼出真实台阶；斜顶箱按梯形截面挤出真实斜面。
+  排布位置仍是外接长方体口径，所以真实形状与外接体之间的空隙就是保守留空。
+- 每箱缩 4mm 只为视觉缝隙（只作用于渲染，不动排布数据）。
+- 交互：左键拖动旋转、滚轮缩放、右键/Shift 拖动平移；图例点选高亮某个箱型；「显示」下拉只看第 N 层。
+- 尺寸标注（内长/内宽/内高/柜门）是 HTML 叠加层，每帧按相机投影定位。
 

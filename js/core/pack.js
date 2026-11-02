@@ -82,6 +82,12 @@
         shapeName: shape.name,
         name: (row.name || '').trim(),
         bbox: bb,
+        // 真实几何参数，供 3D 按形状渲染（不是外接长方体）
+        shapeValues: shape.key === 'lshape'
+          ? { l: S.toNum(v.L), w: S.toNum(v.W), h: bb.h, wlow: S.toNum(v.Wlow), whigh: S.toNum(v.Whigh), hlow: S.toNum(v.Hlow), hhigh: S.toNum(v.Hhigh) }
+          : shape.key === 'slope'
+            ? { l: S.toNum(v.L), w: S.toNum(v.W), h: bb.h, hlow: S.toNum(v.Hlow), hhigh: S.toNum(v.Hhigh) }
+            : { l: S.toNum(v.L), w: S.toNum(v.W), h: bb.h },
         qty: qty,
         unitWeight: Number.isFinite(w) ? w : null,
         netVolumeEach: shape.volume(v),
