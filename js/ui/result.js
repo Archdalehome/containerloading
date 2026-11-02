@@ -87,16 +87,23 @@
           : '本柜装 ' + t.loadedCount.toLocaleString('zh-CN') + ' 箱，剩余需 ' + (extra ? extra.count : '?') + ' 个') + '</span></div>' +
       '</div>';
 
-    // 配套箱建议：L 形台阶缺口用配套箱填平后能多装多少
+    // 配套箱建议：L 形台阶缺口填平后能多装多少（分「有配套件」和「用垫块」两种情况）
     if (pack.suggestions && pack.suggestions.length) {
       html += '<div class="advice">';
       pack.suggestions.forEach(function (s) {
         var f = s.filler;
-        html += '<p class="advice-title">加 ' + s.fillerQty + ' 个 ' +
-          S.num(f.l) + '×' + S.num(f.w) + '×' + S.num(f.h) + ' 的配套箱，' +
-          esc(s.name) + ' 能多装 <b>' + s.delta + '</b> 箱（' + s.before + ' → <b>' + s.after + '</b>）</p>';
+        var dims = S.num(f.l) + '×' + S.num(f.w) + '×' + S.num(f.h);
+        html += '<p class="advice-title">缺口尺寸 ' + dims + '：填平后 ' + esc(s.name) +
+          ' 能从 ' + s.before + ' 箱装到 <b>' + s.after + '</b> 箱（多 ' + s.delta + ' 箱）</p>';
+        html += '<ul class="advice-list">' +
+          '<li><b>手里有配套件</b>：加 ' + s.fillerQty + ' 个 ' + dims + ' 的配套箱，' +
+          'L 形装 ' + s.after + ' 箱、配套件 ' + s.fillerQty + ' 箱，合计 ' +
+          (s.after + s.fillerQty) + ' 箱；等价于多发 ' + s.fillerQty + ' 箱货。</li>' +
+          '<li><b>没有配套件</b>：用 ' + dims + ' 的垫块 / 纸板把缺口垫平，L 形同样能装到 ' + s.after +
+          ' 箱，装载量和有配套件时一样，但不多发货，垫块回收或计入包装即可。</li>' +
+          '</ul>';
       });
-      html += '<p class="advice-sub">原理：台阶缺口填平后这一层顶面变成完整水平面，才能继续往上叠。配套箱尺寸按 L 形缺口算，用户手里通常就有这种配箱。</p></div>';
+      html += '<p class="advice-sub">两种情况能装的 L 箱数相同，区别只在「要不要多发一款货」。台阶缺口填平后这一层顶面才是完整水平面，才能继续往上叠。</p></div>';
     }
 
     // 未装完的必须说清原因，并给出补柜数量
