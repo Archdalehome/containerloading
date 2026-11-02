@@ -434,7 +434,7 @@
 
     var placements = [];
     var layers = [];
-    var dunnageSurfaces = [];
+    var dunnageBlocks = [];
     var z = 0;
     var usedWeight = 0;
     var loadedCount = 0;
@@ -728,13 +728,18 @@
       if (!pair && cand.shape === 'lshape' && opts.allowDunnage) {
         var svD = cand.shapeValues;
         var topZ = layerZ + svD.hhigh;
+        var dunnageH = svD.hhigh - svD.hlow;
         placements.forEach(function (q) {
           if (q.layer !== layerIndex) return;
           var stq = stepSurface(cand, q);
           if (!stq) return;
           if (supportedAt(stq.x, stq.y, stq.l, stq.w, topZ)) return;
           addSurface(topZ, { x: stq.x, y: stq.y, l: stq.l, w: stq.w });
-          dunnageSurfaces.push({ z: topZ, rect: { x: stq.x, y: stq.y, l: stq.l, w: stq.w } });
+          dunnageBlocks.push({
+            x: stq.x, y: stq.y, z: layerZ + svD.hlow,
+            l: stq.l, w: stq.w, h: dunnageH,
+            layer: layerIndex
+          });
           layerDunnage++;
         });
       }
@@ -818,7 +823,7 @@
       items: items,
       placements: placements,
       layers: layers,
-      dunnageSurfaces: dunnageSurfaces,
+      dunnage: dunnageBlocks,
       usedHeight: z,
       containerVolume: containerVolume,
       stop: stop,
@@ -984,9 +989,9 @@
       });
     });
     // 垫块同样提供水平承重面（不增加货量，但是真实装柜里填平缺口的做法）
-    (pack.dunnageSurfaces || []).forEach(function (s) {
-      var k = key(s.z);
-      (surface[k] = surface[k] || []).push(s.rect);
+    (pack.dunnage || []).forEach(function (b) {
+      var k = key(b.z + b.h);
+      (surface[k] = surface[k] || []).push({ x: b.x, y: b.y, l: b.l, w: b.w });
     });
 
     // 1. 支撑（对扣上件由下件贴合支撑，单独在第 3 条校验）

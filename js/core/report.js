@@ -20,6 +20,10 @@
     return (Math.round(x * 1000) / 10).toFixed(1) + '%';
   }
 
+  function num(n) {
+    return String(Math.round(n * 100) / 100);
+  }
+
   /** CSV 字段转义：含逗号、引号、换行就加引号 */
   function cell(v) {
     var s = v === null || v === undefined ? '' : String(v);
@@ -124,7 +128,26 @@
           : L.kind === 'flip' ? '倒放' : '正放';
       out.push(line([L.layer, L.shapeName, L.name, L.count, L.capacity, L.height, L.bottom, L.top, pose]));
     });
+
     out.push('');
+
+    // 垫块单列：不计入箱数与净体积
+    var dunnage = pack.dunnage || [];
+    if (dunnage.length) {
+      out.push('垫块（非货品，不计箱数与净体积）');
+      out.push(line(['层号', '数量', '单块尺寸(mm)', '单块体积(m³)', '合计体积(m³)']));
+      var byLayer = {};
+      dunnage.forEach(function (b) { byLayer[b.layer + 1] = (byLayer[b.layer + 1] || 0) + 1; });
+      Object.keys(byLayer).forEach(function (k) {
+        var first = dunnage.filter(function (b) { return (b.layer + 1) === Number(k); })[0];
+        var vol = first.l * first.w * first.h / 1e9;
+        out.push(line([k, byLayer[k], num(first.l) + '×' + num(first.w) + '×' + num(first.h),
+          vol.toFixed(4), (vol * byLayer[k]).toFixed(3)]));
+      });
+      var totalVol = dunnage.reduce(function (s, b) { return s + b.l * b.w * b.h; }, 0);
+      out.push(line(['合计', dunnage.length, '', '', (totalVol / 1e9).toFixed(3)]));
+      out.push('');
+    }
 
     out.push(line(['逐箱明细']));
     out.push(line(['序号', '层号', '列号', '排号', '箱型', '名称', '姿态',

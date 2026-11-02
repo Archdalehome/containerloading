@@ -64,10 +64,15 @@
     var allLoaded = t.remainingCount === 0;
     var totalContainers = 1 + (extra ? extra.count : 0);
 
+    var dunnageVol = (pack.dunnage || []).reduce(function (s, b) { return s + b.l * b.w * b.h; }, 0);
+    var spaceWithDunnage = pack.containerVolume > 0 ? (t.netVolume + dunnageVol) / pack.containerVolume : 0;
+
     var html = '<div class="metrics">' +
       '<div class="metric"><span class="metric-label">体积装载率</span>' +
         '<span class="metric-value">' + pct(t.fillRate) + '</span>' +
-        '<span class="metric-sub">净体积 ' + m3(t.netVolume) + ' / 柜内 ' + m3(pack.containerVolume) + ' m³</span></div>' +
+        '<span class="metric-sub">净体积 ' + m3(t.netVolume) + ' / 柜内 ' + m3(pack.containerVolume) + ' m³' +
+          (dunnageVol > 0 ? ' · 含垫块占用 ' + pct(spaceWithDunnage) + '（垫块 ' + m3(dunnageVol) + ' m³，非货品）' : '') +
+        '</span></div>' +
       '<div class="metric"><span class="metric-label">已装箱数</span>' +
         '<span class="metric-value">' + t.loadedCount.toLocaleString('zh-CN') + ' <small>/ ' + t.requestedCount.toLocaleString('zh-CN') + ' 箱</small></span>' +
         '<span class="metric-sub">' + (allLoaded ? '全部装完' : '剩余 ' + t.remainingCount.toLocaleString('zh-CN') + ' 箱未装') + '</span></div>' +
@@ -198,6 +203,9 @@
       var fillText = (L.fill && L.fill.length)
         ? L.fill.map(function (f) { return (f.name || '填缝箱') + ' ' + f.count + ' 箱'; }).join('、')
         : '—';
+      if (L.dunnage > 0) {
+        fillText = (fillText === '—' ? '' : fillText + '；') + '垫块 ' + L.dunnage + ' 块（非货品）';
+      }
       html += '<tr>' +
         '<td class="num">' + (L.index + 1) + '</td>' +
         '<td>' + esc(L.shapeName) + '</td>' +

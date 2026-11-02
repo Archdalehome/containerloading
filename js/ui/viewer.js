@@ -30,6 +30,7 @@ const S = {
   pack: null,
   meshes: [],
   lines: [],
+  dunnageMeshes: [],
   dimLabels: {},
   cam: { theta: 0.62, phi: 1.05, radius: 10000, target: new THREE.Vector3() },
   dirty: true,
@@ -412,6 +413,7 @@ function clearScene() {
   S.scene.add(S.root);
   S.meshes = [];
   S.lines = [];
+  S.dunnageMeshes = [];
   Object.keys(S.dimLabels).forEach((k) => S.dimLabels[k].remove());
   S.dimLabels = {};
   S.layer = 0;
@@ -479,6 +481,41 @@ function buildInstanced(pack) {
   });
 }
 
+/** 垫块：灰色半透明，和货品明显区分（不是货，但必须画出来，否则上面的箱子看着像悬空） */
+function buildDunnage(pack) {
+  const blocks = pack.dunnage || [];
+  if (!blocks.length) return;
+  const c = pack.container;
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const q = new THREE.Quaternion();
+  const pos = new THREE.Vector3();
+  const scale = new THREE.Vector3();
+  const m4 = new THREE.Matrix4();
+  const byLayer = {};
+  blocks.forEach((b) => {
+    (byLayer[b.layer] = byLayer[b.layer] || []).push(b);
+  });
+  Object.keys(byLayer).forEach((k) => {
+    const list = byLayer[k];
+    const mesh = new THREE.InstancedMesh(
+      geo,
+      new THREE.MeshLambertMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.45 }),
+      list.length
+    );
+    mesh.frustumCulled = false;
+    list.forEach((b, i) => {
+      pos.set(b.x + b.l / 2 - c.innerL / 2, b.z + b.h / 2, b.y + b.w / 2 - c.innerW / 2);
+      scale.set(b.l, b.h, b.w);
+      m4.compose(pos, q, scale);
+      mesh.setMatrixAt(i, m4);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.userData = { layer: list[0].layer + 1 };
+    S.root.add(mesh);
+    S.dunnageMeshes.push(mesh);
+  });
+}
+
 function applyFilters() {
   const hi = S.highlight;
 
@@ -497,6 +534,9 @@ function applyFilters() {
 
   S.meshes.forEach(sync);
   S.lines.forEach(sync);
+  S.dunnageMeshes.forEach(function (m) {
+    m.visible = S.layer === 0 || m.userData.layer === S.layer;
+  });
   S.dirty = true;
 }
 
@@ -570,6 +610,7 @@ function build(pack) {
   const c = pack.container;
   S.root.add(buildContainer(pack));
   buildInstanced(pack);
+  buildDunnage(pack);
 
   S.dimLabels.len = makeLabel('内长 ' + Math.round(c.innerL) + ' mm', 'dim-l');
   S.dimLabels.width = makeLabel('内宽 ' + Math.round(c.innerW) + ' mm', 'dim-w');
@@ -601,6 +642,14 @@ function buildLegend() {
     });
     wrap.appendChild(chip);
   });
+
+  if (S.pack.dunnage && S.pack.dunnage.length) {
+    const chip = document.createElement('span');
+    chip.className = 'legend-item legend-dunnage';
+    chip.innerHTML = '<i style="background:#94a3b8"></i><span class="legend-name">垫块（非货品）</span>' +
+      '<span class="legend-count">' + S.pack.dunnage.length + ' 块</span>';
+    wrap.appendChild(chip);
+  }
 
   const sel = document.getElementById('layer-select');
   if (sel) {

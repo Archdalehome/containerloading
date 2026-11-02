@@ -280,6 +280,31 @@ function pageTestScript() {
   const fillToggle = $('#allow-fill');
   step('填缝开关存在且默认关', !!fillToggle && !fillToggle.checked);
 
+  // 12. 垫块：L 形 + 垫块开关，3D 必须画出垫块且不计箱数
+  click($('.shape-tab[data-shape="lshape"]', cards()[0]));
+  await wait(100);
+  setField(0, 'L', '600');
+  setField(0, 'W', '400');
+  setField(0, 'Wlow', '160');
+  setField(0, 'Whigh', '240');
+  setField(0, 'Hlow', '300');
+  setField(0, 'Hhigh', '500');
+  setVal($('.qty-input', cards()[0]), '400');
+  const dToggle = $('#allow-dunnage');
+  step('垫块开关存在', !!dToggle);
+  if (dToggle) {
+    dToggle.checked = true;
+    dToggle.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  await calc();
+  const dnPack = window.CL.app.lastPack;
+  step('垫块开关生效', !!dnPack.dunnage && dnPack.dunnage.length > 0, dnPack.dunnage ? dnPack.dunnage.length : 0);
+  step('垫块不计入箱数', dnPack.placements.length === dnPack.totals.loadedCount);
+  await wait(400);
+  step('3D 画出垫块', window.CL3D._state.dunnageMeshes.length > 0 &&
+    window.CL3D._state.dunnageMeshes[0].count > 0,
+    window.CL3D._state.dunnageMeshes.length);
+
   // 11. 校验 localStorage 持久化
   const saved = localStorage.getItem('containerloading.v1');
   step('输入已本地保存', !!saved && JSON.parse(saved).rows.length === 1);
