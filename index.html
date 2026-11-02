@@ -191,6 +191,24 @@
           排布位置仍按外接长方体紧贴计算。箱体描边是一个整体几何，不会拖慢交互。</p>
       </div>
       <div class="help-item">
+        <h3>为什么有空间却装不进去</h3>
+        <p>装载率下面有一栏「为什么停」，把剩余空间拆成<b>可承重</b>和<b>不可承重</b>：
+          斜面（斜顶箱单只，放上去就塌）、顶面零碎（顶面高低不齐，一整只箱跨不过去）、高度不足（层数取整）。
+          每条阻塞原因后面会给能解锁的开关和能到多少箱。</p>
+      </div>
+      <div class="help-item">
+        <h3>同款箱换姿态填条带</h3>
+        <p>主姿态铺满后剩下的窄带，会先用<b>同款箱的其它姿态</b>（转 90°、侧放）去塞，
+          塞不下的才交给别的箱型；分层明细里「主姿态 / 换姿态填条带」分开列。
+          条带里的箱子可以比本层高（那一片上面不再叠层），但仍须下方有完整支撑。</p>
+      </div>
+      <div class="help-item">
+        <h3>姿态开关会限制所有方案</h3>
+        <p>「可侧放 / 可倒放」是硬限制：没勾的姿态不会出现在任何方案里
+          （有「此面向上」标识的货一定要保持不勾）。想比较开关能多装多少，勾上重算即可，
+          「为什么停」里也会给出差值。</p>
+      </div>
+      <div class="help-item">
         <h3>装不下时看「所需柜数」</h3>
         <p>装不完时，结果页会按同规格柜重算剩余货物还需要几个柜，并列出每柜装多少箱；
           超过门高或底面超尺寸的箱子换柜也装不进，会单独列出来说明要改箱型。</p>
@@ -215,6 +233,7 @@
 <script src="js/core/validate.js"></script>
 <script src="js/core/solid.js"></script>
 <script src="js/core/pack.js"></script>
+<script src="js/core/explain.js"></script>
 <script src="js/core/report.js"></script>
 <script src="js/core/storage.js"></script>
 <script src="js/ui/container-panel.js"></script>

@@ -474,6 +474,81 @@
       return Math.max(0, c.payload - usedWeight);
     }
 
+    /**
+     * 同款箱换姿态填本层剩下的条带（利用率优先）。
+     *
+     * 主姿态按格子铺满后，柜宽方向常剩下一条放不下主姿态的窄带——
+     * 例如 2352 宽、箱宽 600 排 3 列，剩 552mm，主姿态塞不进，但同款箱转 90° 或侧放就塞得进去。
+     * 条带很窄、候选只有几组，直接把同款箱所有允许姿态 × 朝向暴力试一遍，不做过多的优化。
+     *
+     * 只放用户允许的姿态：倒放仅矩形箱可独立落地（斜顶/L 倒过来没有水平底面），侧放看「可侧放」开关。
+     * 返回 {placed, bands}：placed 是这一条带塞进去的箱数，bands 是没填满、可以交给跨 SKU 填缝的余带。
+     */
+    function fillStripSameSku(strip, maxThickness, layerZ, cand, layerIdx, log) {
+      var bands = [strip];
+      var left = [];
+      var placed = 0;
+      var maxTop = layerZ;
+      var guard = 0;
+      while (bands.length && guard++ < 10) {
+        var band = bands.shift();
+        if (band.l <= EPS || band.w <= EPS) continue;
+        var best = null;
+        var poses = posesFor(cand);
+        for (var k = 0; k < poses.length; k++) {
+          var pose = poses[k];
+          if (pose.flip && cand.shape !== 'rect') continue;
+          if (pose.thickness > maxThickness + EPS) continue;
+          var nx = Math.floor((band.l + EPS) / pose.fx);
+          var ny = Math.floor((band.w + EPS) / pose.fy);
+          if (nx <= 0 || ny <= 0) continue;
+          var cap = nx * ny;
+          if (!best || cap > best.cap || (cap === best.cap && pose.thickness > best.pose.thickness)) {
+            best = { pose: pose, nx: nx, ny: ny, cap: cap };
+          }
+        }
+        if (!best) { left.push(band); continue; }
+        var limit = Math.min(best.cap, cand.remaining);
+        if (weightKnown && cand.unitWeight > 0) {
+          limit = Math.min(limit, Math.floor(weightRoom() / cand.unitWeight));
+        }
+        if (limit <= 0) { left.push(band); continue; }
+        var n = 0;
+        for (var r = 0; r < best.ny && n < limit; r++) {
+          for (var cc = 0; cc < best.nx && n < limit; cc++) {
+            var bx = band.x + cc * best.pose.fx;
+            var by = band.y + r * best.pose.fy;
+            if (!supportedAt(bx, by, best.pose.fx, best.pose.fy, layerZ)) continue;
+            var sp = {
+              skuId: cand.id, index: items.indexOf(cand),
+              col: cc + 1, row: r + 1,
+              x: bx, y: by, z: layerZ, l: best.pose.fx, w: best.pose.fy, h: best.pose.thickness,
+              rot: best.pose.fx === cand.bbox.l ? 0 : 90,
+              layer: layerIdx, pose: best.pose.m, kind: 'strip'
+            };
+            placements.push(sp);
+            addSupport(sp);
+            cand.loaded++;
+            cand.remaining--;
+            loadedCount++;
+            placed++;
+            n++;
+            if (layerZ + best.pose.thickness > maxTop) maxTop = layerZ + best.pose.thickness;
+            usedWeight += (cand.unitWeight || 0);
+          }
+        }
+        if (n === 0) { left.push(band); continue; }
+        log.push({ pose: best.pose, count: n });
+        var ux = band.x + best.nx * best.pose.fx;
+        var uy = band.y + best.ny * best.pose.fy;
+        var restX = band.x + band.l - ux;
+        var restY = band.y + band.w - uy;
+        if (restX > EPS) bands.push({ x: ux, y: band.y, l: restX, w: band.w });
+        if (restY > EPS) bands.push({ x: band.x, y: uy, l: Math.min(band.l, ux - band.x), w: restY });
+      }
+      return { placed: placed, bands: left.concat(bands), maxTop: maxTop };
+    }
+
     while (true) {
       if (loadedCount >= MAX_BOXES) {
         stop = { code: 'limit', message: '已达到单次计算上限 ' + MAX_BOXES + ' 箱' };
@@ -622,14 +697,32 @@
       loadedCount += placed;
       usedWeight += placed * unitW;
 
-      // 填缝：只往本层剩下的两条带里加箱，层高不变
-      if (allowFill && !pair) {
+      // 本层剩下的两条带：先用同款箱换姿态塞满（利用率优先），塞不下的再交给别的箱型
+      var stripLog = [];
+      var stripPlaced = 0;
+      var stripTop = 0;
+      var residual = [];
+      if (!pair && !opts.noStripFill) {
         var usedX = Math.min(nx * candPose.fx, c.innerL);
         var usedY = Math.min(ny * candPose.fy, c.innerW);
-        var strips = [
+        // 条带里的箱子可以比本层高（那一片上面不再叠层），上限是剩余层高与门高
+        var stripMaxH = Math.min(c.innerH - z, c.doorH);
+        [
           { x: usedX, y: 0, l: c.innerL - usedX, w: c.innerW },
           { x: 0, y: usedY, l: usedX, w: c.innerW - usedY }
-        ];
+        ].forEach(function (strip) {
+          if (strip.l <= EPS || strip.w <= EPS) return;
+          var res = fillStripSameSku(strip, stripMaxH, z, cand, layerIndex, stripLog);
+          stripPlaced += res.placed;
+          if (res.maxTop > stripTop) stripTop = res.maxTop;
+          residual = residual.concat(res.bands);
+        });
+        fillTotal += stripPlaced;
+      }
+
+      // 跨 SKU 填缝：只往同款填完的余带里加箱，层高不变
+      if (allowFill && !pair) {
+        var strips = residual;
         strips.forEach(function (strip) {
           if (strip.l <= EPS || strip.w <= EPS) return;
           var filler = pickFiller(strip, thickness, z, cand, items, sorted, c, weightKnown, usedWeight);
@@ -759,6 +852,10 @@
         rot: pair ? 90 : (candPose.fx === cand.bbox.l ? 0 : 90),
         kind: pair ? 'pair' : (candPose.side ? 'side' : (candPose.flip ? 'flip' : 'normal')),
         fill: layerFill,
+        mainCount: placed,
+        stripCount: stripPlaced,
+        stripTop: stripTop > 0 ? stripTop : layerTop,
+        stripFills: stripLog,
         dunnage: layerDunnage,
         pose: pair ? null : candPose.m
       });
@@ -1206,10 +1303,12 @@
     var plans = [];
 
     configs.forEach(function (cfg) {
+      // 方案只能使用用户允许的姿态：策略档是「可以试到哪一档」，每个 SKU 的开关是「允许用哪几档」，
+      // 两者取交集。否则没勾「可倒放」的货会被方案枚举翻过来放——现实中「此面向上」的货会装错方向。
       var rows = (state.rows || []).map(function (r) {
         return Object.assign({}, r, {
-          allowFlip: cfg.policy.allowFlip,
-          allowSide: cfg.policy.allowSide
+          allowFlip: cfg.policy.allowFlip && !!r.allowFlip,
+          allowSide: cfg.policy.allowSide && !!r.allowSide
         });
       });
       var pack = run({

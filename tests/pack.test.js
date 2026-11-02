@@ -437,6 +437,44 @@ test('反向用例：不对称 L 形（160/240）镜像翻转后仍然穿插，�
   assert.ok(codes.indexOf('pair-overlap') >= 0, '不对称 L 硬凑本应实体穿插：' + JSON.stringify(codes));
 });
 
+test('同款箱换姿态填条带：箱数只增不减，且不越界、不重叠、不悬空', () => {
+  const cases = [[550, 450, 300], [610, 390, 310], [600, 400, 300], [540, 460, 320]];
+  let gained = 0;
+  let stripTotal = 0;
+  cases.forEach((d) => {
+    [true, false].forEach((side) => {
+      const mkRow = () => {
+        const r = row('a', { L: String(d[0]), W: String(d[1]), H: String(d[2]) }, 3000, '', 'rect');
+        r.allowSide = side;
+        r.allowFlip = false;
+        return r;
+      };
+      const withStrip = P.run(state(C.get('40HQ'), [mkRow()]));
+      const noStrip = P.run({ container: C.get('40HQ'), rows: [mkRow()], options: { noStripFill: true } });
+      const tag = d.join('×') + (side ? ' 侧放开' : ' 侧放关');
+      assert.ok(withStrip.totals.loadedCount >= noStrip.totals.loadedCount,
+        tag + ' 加条带填缝后变少了：' + noStrip.totals.loadedCount + ' → ' + withStrip.totals.loadedCount);
+      const strip = withStrip.layers.reduce((s, L) => s + (L.stripCount || 0), 0);
+      stripTotal += strip;
+      gained += withStrip.totals.loadedCount - noStrip.totals.loadedCount;
+      assertInBounds(withStrip, C.get('40HQ'), tag);
+      assertNoOverlap(withStrip, tag);
+      assertSupported(withStrip, tag);
+      assert.deepStrictEqual(P.validatePhysics(withStrip), [], tag + ' 物理校验');
+      if (strip > 0) {
+        const sp = withStrip.placements.filter((p) => p.kind === 'strip');
+        assert.strictEqual(sp.length, strip, tag + ' 条带箱数对不上');
+        sp.forEach((p) => {
+          assert.ok(p.h > 0 && p.z >= 0, tag + ' 条带箱尺寸异常');
+          assert.ok(p.z + p.h <= C.get('40HQ').innerH + 1e-6, tag + ' 条带箱超高');
+        });
+      }
+    });
+  });
+  assert.ok(stripTotal > 0, '所有用例都没触发换姿态填条带，功能等于没接上');
+  assert.ok(gained > 0, '填条带没有带来任何收益，样本选得不对');
+});
+
 test('缺口嵌合：L 形台阶上能塞进小箱，且不悬空', () => {  const rows = [
     row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 200, '', 'lshape'),
     row('s', { L: '200', W: '150', H: '200' }, 2000, '', 'rect')

@@ -351,6 +351,55 @@ function pageTestScript() {
   step('给出补柜数量', $('#result-body').textContent.includes('还需 1 个柜'), $('#result-body').textContent.slice(0, 200));
   step('所需柜数 2 个 40HQ', $('#result-body').textContent.includes('2 个 40HQ'));
 
+  // 为什么停：装载率旁边必须有原因和空间拆分
+  const whyBox = $('#result-body .why-box');
+  step('结果页有「为什么停」', !!whyBox, whyBox ? 'ok' : '没有 .why-box');
+  if (whyBox) {
+    const whyText = whyBox.textContent.replace(/\s+/g, ' ');
+    step('为什么停写了停止原因', whyText.includes('为什么停在这里') && whyText.length > 20, whyText.slice(0, 80));
+    step('剩余空间拆成可承重 / 不可承重', whyText.includes('可承重') && whyText.includes('不可承重'), whyText.slice(0, 200));
+    step('不可承重拆出斜面 / 零碎 / 高度不足',
+      whyText.includes('斜面') && whyText.includes('顶面零碎') && whyText.includes('高度不足'), whyText.slice(0, 220));
+  }
+
+  // 同款换姿态填条带：550×450×300 侧放开，条带里塞得进去
+  click($('.shape-tab[data-shape="rect"]', cards()[0]));
+  await wait(80);
+  setField(0, 'L', '550');
+  setField(0, 'W', '450');
+  setField(0, 'H', '300');
+  const sideOn = $('.opt-side', cards()[0]);
+  if (sideOn && !sideOn.checked) {
+    sideOn.checked = true;
+    sideOn.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  window.CL.app.state.rows[0].allowSide = true;
+  setVal($('.qty-input', cards()[0]), '3000');
+  await calc();
+  await wait(300);
+  const stripPack = window.CL.app.lastPack;
+  const stripCount = stripPack.layers.reduce((s, L) => s + (L.stripCount || 0), 0);
+  step('同款换姿态填条带生效', stripCount > 0, '条带箱数 ' + stripCount + ' · 共 ' + stripPack.totals.loadedCount + ' 箱');
+  const layerTbl = $$('#result-body .tbl').find((t) => t.textContent.includes('层顶高度'));
+  step('分层明细分开显示主姿态 / 条带',
+    !!layerTbl && layerTbl.textContent.includes('主姿态 / 换姿态填条带'), layerTbl ? 'ok' : '没有分层表');
+  const rcStrip = renderCheck(stripPack, 'strip');
+  step('条带填缝后渲染不越界 / 不穿插', rcStrip.outOfBounds === 0 && rcStrip.overlaps === 0,
+    '越界 ' + rcStrip.outOfBounds + ' / 重叠 ' + rcStrip.overlaps);
+  const stripHealth = ($('#health-box') || {}).textContent || '';
+  step('条带填缝后本单体检全 0', stripHealth.includes('全部通过'), stripHealth.replace(/\s+/g, ' ').slice(0, 120));
+
+  // 复位「可侧放」，后面的垫块/对扣用例按默认开关跑
+  if (sideOn) {
+    sideOn.checked = false;
+    sideOn.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  window.CL.app.state.rows[0].allowSide = false;
+  window.CL.app.state.rows[0].allowFlip = false;
+  setVal($('.qty-input', cards()[0]), '1680');
+  await calc();
+  await wait(200);
+
   const csv = window.CL.report.buildCsv(window.CL.app.lastPack, window.CL.app.state, { extra: window.CL.app.lastPack.extra });
   step('CSV 生成正常（入口等 v2 姿态定稿再开放）', csv.includes('分层小计') && csv.includes('逐箱明细') && csv.includes('列号') && csv.split('\\r\\n').length > 200, '长度 ' + csv.length);
   step('导出入口已开放', !!$('#export-btn') && !$('#export-btn').hidden);
@@ -409,6 +458,34 @@ function pageTestScript() {
   step('对扣实体不穿插、接触面贴合', !!pairSolid && pairSolid.overlap <= 1 && pairSolid.gap <= 1,
     pairSolid ? '重叠 ' + pairSolid.overlap.toFixed(2) + ' mm / 缝隙 ' + pairSolid.gap.toFixed(2) +
       ' mm / 上件姿态 ' + pairSolid.pose : '无对扣件');
+
+  // 柜底：占位 min z 与渲染 min Y 一起报，不接受"看起来没超"
+  const floorProbe = (() => {
+    const pack = window.CL.app.lastPack;
+    const st = window.CL3D._state;
+    const T = window.CL3D.THREE;
+    let minZ = Infinity, maxZ = -Infinity, minY = Infinity, maxY = -Infinity;
+    pack.placements.forEach((p) => {
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z + p.h);
+    });
+    const m4 = new T.Matrix4();
+    st.meshes.forEach((m) => {
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      for (let i = 0; i < m.count; i++) {
+        m.getMatrixAt(i, m4);
+        const bb = m.geometry.boundingBox.clone().applyMatrix4(m4);
+        minY = Math.min(minY, bb.min.y);
+        maxY = Math.max(maxY, bb.max.y);
+      }
+    });
+    return { minZ, maxZ, minY, maxY, innerH: pack.container.innerH };
+  })();
+  step('对扣场景柜底：占位 min z = 0，渲染 min Y ≥ 0 且不超柜顶',
+    floorProbe.minZ === 0 && floorProbe.minY >= -1 && floorProbe.maxY <= floorProbe.innerH + 1,
+    '占位 min z=' + floorProbe.minZ + ' max z=' + floorProbe.maxZ +
+    '；渲染 min Y=' + floorProbe.minY.toFixed(2) + ' max Y=' + floorProbe.maxY.toFixed(2) +
+    '；柜内高 ' + floorProbe.innerH);
 
   await wait(500);
   const geoCheck = (() => {
@@ -512,9 +589,28 @@ function pageTestScript() {
   await calc();
   await wait(400);
   const rc40gp = renderCheck(window.CL.app.lastPack, '40gp');
-  step('40GP 满柜：枚举最优 1610 箱（竖放基准 7 层 1470）', window.CL.app.lastPack.totals.loadedCount === 1610,
+  step('40GP 满柜：侧放关 → 竖放 7 层 1470 箱', window.CL.app.lastPack.totals.loadedCount === 1470,
     '已装 ' + window.CL.app.lastPack.totals.loadedCount + ' 箱 / ' + window.CL.app.lastPack.layers.length +
     ' 层 / 姿态 ' + window.CL.app.lastPack.layers.map((l) => l.kind).join(','));
+  // 勾上「可侧放」后方案才能用侧放姿态：1470 → 1610
+  const side40 = $('.opt-side', cards()[0]);
+  if (side40) {
+    side40.checked = true;
+    side40.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  window.CL.app.state.rows[0].allowSide = true;
+  await calc();
+  await wait(300);
+  step('勾选可侧放后 40GP → 1610 箱（开关真的生效）',
+    window.CL.app.lastPack.totals.loadedCount === 1610,
+    '已装 ' + window.CL.app.lastPack.totals.loadedCount + ' 箱');
+  if (side40) {
+    side40.checked = false;
+    side40.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  window.CL.app.state.rows[0].allowSide = false;
+  await calc();
+  await wait(200);
   step('40GP 渲染箱体全在柜内腔（不低于柜底、不超柜顶）', rc40gp.outOfBounds === 0, rc40gp.firstOob || '越界 0 箱');
   step('40GP 渲染箱体两两不相交', rc40gp.overlaps === 0, '重叠 ' + rc40gp.overlaps);
   step('40GP 描边与箱体一致', rc40gp.edgeErr < 1, '偏差 ' + rc40gp.edgeErr.toFixed(2) + ' mm');
@@ -595,6 +691,8 @@ try {
   await cdp.evaluate('localStorage.clear(); true');
   await cdp.send('Page.reload', { ignoreCache: true });
   if (!(await waitForApp())) throw new Error('页面重载后没有渲染出来');
+  // 首次导航偶尔碰上本地 http.server 拒连（脚本加载不全），重载后才是有意义的版本：之前的异常不计
+  cdp.events.length = 0;
 
   const result = await cdp.evaluate(pageTestScript());
 
@@ -840,6 +938,9 @@ try {
   for (const s of result.steps) {
     console.log('  ' + (s.ok ? 'ok  ' : 'FAIL') + ' ' + s.name + (s.ok ? '' : '  ← ' + s.detail));
   }
+  // 柜底这条要把实测数单独打出来：占位 min z 与渲染 min Y 必须一起看
+  const floorStep = result.steps.find((s) => s.name.indexOf('对扣场景柜底') === 0);
+  if (floorStep) console.log('  柜底实测：' + floorStep.detail);
   console.log('\n3D 真实几何：');
   console.log('  ' + (geomOk.lshape ? 'ok  ' : 'FAIL') + ' L 形台阶前段最高 ' +
     (mixed && mixed.lshape ? mixed.lshape.lFront.toFixed(1) : '?') + ' mm，后段最高 ' +

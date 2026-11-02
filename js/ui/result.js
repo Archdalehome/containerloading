@@ -57,6 +57,48 @@
     return html;
   }
 
+  /**
+   * 「为什么停」：装载率旁边的解释。
+   *   1. 停在哪、因为哪条物理规则
+   *   2. 剩余空间拆成可承重 / 不可承重（斜面、顶面零碎、高度不足）
+   *   3. 每条阻塞原因后面挂解锁方式（真跑一遍给的数，不估）
+   */
+  function renderWhy(pack, state) {
+    var X = NS.explain;
+    if (!X) return '';
+    var why = X.stopText(pack);
+    var sp = X.space(pack);
+    var unlocks = X.unlocks(state, pack, pack.planSet);
+    var remainingCargo = pack.totals.remainingCount;
+
+    var html = '<div class="why-box">';
+    html += '<p class="why-title">为什么停在这里：<b>' + esc(why.base) + '</b></p>';
+
+    html += '<p class="why-line">剩余空间 <b>' + m3(sp.remaining) + ' m³</b> = ' +
+      '可承重 <b>' + m3(sp.bearing) + ' m³</b>（顶面是平的，还放得下） + ' +
+      '不可承重 <b>' + m3(sp.nonBearing) + ' m³</b>（斜面 ' + m3(sp.slopeTop) +
+      ' · 顶面零碎 ' + m3(sp.fragment) + ' · 高度不足 ' + m3(sp.heightShort) + '）</p>';
+
+    if (sp.bearing > 1e9 && remainingCargo > 0) {
+      html += '<p class="why-line muted">可承重那部分没被用上，是因为当前<b>一层只排一个主箱型</b>' +
+        '（同层换姿态填条带才刚加上），不是物理限制。</p>';
+    }
+
+    why.items.forEach(function (m) {
+      html += '<p class="why-line">· <b>' + esc(m.name) + '</b> 剩 ' + m.remaining.toLocaleString('zh-CN') +
+        ' 箱 — ' + esc(m.why) + '</p>';
+    });
+
+    if (unlocks.length) {
+      html += '<p class="why-unlock">想再装：' + unlocks.map(function (u) {
+        return '<span class="why-chip' + (u.gated ? ' gated' : '') + '">' + esc(u.label) +
+          ' → <b>' + u.boxes.toLocaleString('zh-CN') + ' 箱</b>（+' + u.delta + '）<small>' + esc(u.note) + '</small></span>';
+      }).join('') + '</p>';
+    }
+    html += '</div>';
+    return html;
+  }
+
   function renderPack(res, pack, state) {
     var t = pack.totals;
     var c = pack.container;
@@ -120,6 +162,8 @@
           ? '全部装进本柜'
           : '本柜装 ' + t.loadedCount.toLocaleString('zh-CN') + ' 箱，剩余需 ' + (extra ? extra.count : '?') + ' 个') + '</span></div>' +
       '</div>';
+
+    html += renderWhy(pack, state);
 
     // 配套箱建议：L 形台阶缺口填平后能多装多少（分「有配套件」和「用垫块」两种情况）
     if (pack.suggestions && pack.suggestions.length) {
@@ -221,7 +265,7 @@
     // 分层
     html += '<h3 class="block-title">分层明细 <span class="muted">（自下而上，层号 1 在最底层）</span></h3>' +
       '<div class="table-wrap tall"><table class="tbl"><thead><tr>' +
-      '<th>层</th><th>箱型</th><th>名称</th><th>本层箱数</th><th>单层容量</th><th>层高 (mm)</th><th>层顶高度 (mm)</th><th>姿态</th><th>本层填缝</th>' +
+      '<th>层</th><th>箱型</th><th>名称</th><th>本层箱数</th><th>其中主姿态 / 换姿态填条带</th><th>单层容量</th><th>层高 (mm)</th><th>层顶高度 (mm)</th><th>姿态</th><th>本层填缝</th>' +
       '</tr></thead><tbody>';
     pack.layers.forEach(function (L) {
       var item = null;
@@ -240,6 +284,8 @@
         '<td>' + esc(L.shapeName) + '</td>' +
         '<td>' + esc(item ? nameOf(item) : (L.skuName || '—')) + '</td>' +
         '<td class="num mono">' + L.count + '</td>' +
+        '<td class="num mono">' + (L.mainCount !== undefined ? L.mainCount : L.count) +
+          ' / ' + (L.stripCount || 0) + '</td>' +
         '<td class="num mono">' + L.capacity + '</td>' +
         '<td class="num mono">' + S.num(L.height) + '</td>' +
         '<td class="num mono">' + S.num(L.top) + '</td>' +
