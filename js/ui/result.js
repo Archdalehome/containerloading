@@ -67,7 +67,28 @@
     var dunnageVol = (pack.dunnage || []).reduce(function (s, b) { return s + b.l * b.w * b.h; }, 0);
     var spaceWithDunnage = pack.containerVolume > 0 ? (t.netVolume + dunnageVol) / pack.containerVolume : 0;
 
-    var html = '<div class="metrics">' +
+    var html = '';
+
+    // 方案对比条：全部方案的箱数都列出来，前 3 名可切 3D
+    if (pack.planSet) {
+      var ps = pack.planSet;
+      var sortedPlans = ps.plans.slice().sort(function (a, b) {
+        if (b.boxes !== a.boxes) return b.boxes - a.boxes;
+        return a.cog.lateral - b.cog.lateral;
+      });
+      html += '<div class="plans"><p class="plans-title">已比较 <b>' + ps.compared + '</b> 种方案，最优 <b>' +
+        (ps.best ? ps.best.boxes : 0) + '</b> 箱' +
+        (ps.best ? '（' + esc(ps.best.config.label) + '）' : '') + '</p><div class="plan-list">';
+      sortedPlans.forEach(function (p, idx) {
+        var cls = 'plan-chip' + (idx < 3 ? ' top' : '') + (p.valid ? '' : ' invalid') +
+          (pack === p.pack ? ' active' : '');
+        html += '<button type="button" class="' + cls + '" data-plan="' + p.config.id + '" title="' +
+          esc(p.config.label) + '">#' + p.config.id + ' ' + p.boxes + ' 箱' + (p.valid ? '' : ' ✗') + '</button>';
+      });
+      html += '</div><p class="plans-sub">按箱数排名：箱数 → 重心横向偏移 → 净体积；同类方案里只有合法排布参与排名。前 3 名可点击切换 3D。</p></div>';
+    }
+
+    html += '<div class="metrics">' +
       '<div class="metric"><span class="metric-label">体积装载率</span>' +
         '<span class="metric-value">' + pct(t.fillRate) + '</span>' +
         '<span class="metric-sub">净体积 ' + m3(t.netVolume) + ' / 柜内 ' + m3(pack.containerVolume) + ' m³' +

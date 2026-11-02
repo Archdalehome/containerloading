@@ -533,5 +533,59 @@ test('不对称 L 形硬做对扣必须报 pair-asymmetric-l', () => {
   assert.ok(errs.some((e) => e.code === 'pair-asymmetric-l'), JSON.stringify(errs.map((e) => e.code)));
 });
 
+// ---------- 多方案枚举 ----------
+console.log('\n多方案枚举');
+
+test('runPlans：每个方案都过物理校验，排名按箱数 → 重心 → 净体积', () => {
+  const rows = [
+    row('a', { L: '400', W: '300', H: '300' }, 300),
+    row('b', { L: '600', W: '400', Hlow: '300', Hhigh: '500' }, 300, '', 'slope'),
+    row('c', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 200, '', 'lshape')
+  ];
+  const ps = P.runPlans(state(C.get('40HQ'), rows, false));
+  assert.strictEqual(ps.compared, 24);
+  ps.plans.forEach((p) => {
+    assert.deepStrictEqual(p.errors, [], '方案 #' + p.config.id + ' 物理校验未通过');
+  });
+  for (let i = 1; i < ps.ranked.length; i++) {
+    const a = ps.ranked[i - 1];
+    const b = ps.ranked[i];
+    const ok = a.boxes > b.boxes ||
+      (a.boxes === b.boxes && a.cog.lateral < b.cog.lateral - 1e-9) ||
+      (a.boxes === b.boxes && Math.abs(a.cog.lateral - b.cog.lateral) < 1e-9 && a.net >= b.net);
+    assert.ok(ok, '排名顺序不对：' + JSON.stringify([a.boxes, a.cog.lateral, b.boxes, b.cog.lateral]));
+  }
+});
+
+test('1680 基准：侧放关时仍是 1680（条件断言，不是「最优必须 1680」）', () => {
+  const rows = [row('a', { L: '400', W: '300', H: '300' }, 1680)];
+  const ps = P.runPlans(state(C.get('40HQ'), rows, false));
+  const uprightPlans = ps.plans.filter((p) => p.config.policy.key === 'upright');
+  assert.ok(uprightPlans.length > 0);
+  uprightPlans.forEach((p) => {
+    if (p.config.order.key === 'volume') {
+      assert.strictEqual(p.boxes, 1680, '侧放关、按体积排序时应为 1680');
+    }
+  });
+  // 侧放开、货量给足时允许更多（1820），这不算回归
+  const sideRows = [row('a', { L: '400', W: '300', H: '300' }, 5000)];
+  const sidePs = P.runPlans(state(C.get('40HQ'), sideRows, false));
+  assert.ok(sidePs.best.boxes >= 1680);
+});
+
+test('5000 箱输入：枚举完成且 ≤ 2 秒', () => {
+  const rows = [
+    row('a', { L: '400', W: '300', H: '300' }, 3000, '5'),
+    row('b', { L: '600', W: '400', Hlow: '300', Hhigh: '500' }, 1000, '6', 'slope'),
+    row('c', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '7', 'lshape')
+  ];
+  const t0 = Date.now();
+  const ps = P.runPlans(state(C.get('40HQ'), rows, false));
+  const ms = Date.now() - t0;
+  assert.strictEqual(ps.compared, 12, '5000 箱档位应为 12 个方案');
+  assert.ok(ms <= 2000, '耗时 ' + ms + ' ms 超过 2 秒');
+  console.log('      5000 箱 × ' + ps.compared + ' 方案耗时 ' + ms + ' ms');
+});
+
 console.log('\n' + passed + ' 通过，' + failures.length + ' 失败\n');
 if (failures.length) process.exit(1);

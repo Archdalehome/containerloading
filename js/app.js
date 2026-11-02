@@ -177,6 +177,31 @@
       if (root.CL3D.init(host)) root.CL3D.build(p);
     });
 
+    // 方案切换：点结果页的方案条
+    function selectPlan(planId) {
+      var ps = CL.app.planSet;
+      if (!ps) return;
+      var entry = null;
+      ps.plans.forEach(function (p) { if (String(p.config.id) === String(planId)) entry = p; });
+      if (!entry) return;
+      var pack = entry.pack;
+      pack.planSet = ps;
+      pack.extra = pack.totals.remainingCount > 0 ? CL.pack.extraContainers(CL.app.lastState, pack) : null;
+      pack.suggestions = CL.pack.suggestFillers(CL.app.lastState, pack);
+      CL.app.lastPack = pack;
+      CL.ui.result.render(CL.app.lastRes, pack, CL.app.lastState);
+      showViewer(pack);
+    }
+
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var chip = t.closest('.plan-chip');
+      if (chip && chip.dataset.plan) {
+        selectPlan(chip.dataset.plan);
+      }
+    });
+
     var layerSelect = document.getElementById('layer-select');
     if (layerSelect) {
       layerSelect.addEventListener('change', function (e) {
@@ -198,13 +223,22 @@
       rowsUI.paintErrors();
 
       var res = V.all(state);
-      var pack = res.ok ? CL.pack.run(state) : null;
+      var planSet = res.ok ? CL.pack.runPlans(state) : null;
+      var pack = null;
+      if (planSet) {
+        pack = (planSet.best && planSet.best.pack) || (planSet.plans[0] && planSet.plans[0].pack) || null;
+      }
       if (pack) {
+        pack.planSet = planSet;
         pack.extra = pack.totals.remainingCount > 0 ? CL.pack.extraContainers(state, pack) : null;
         pack.suggestions = CL.pack.suggestFillers(state, pack);
         CL.app.lastPack = pack;
+        CL.app.planSet = planSet;
+        CL.app.lastRes = res;
+        CL.app.lastState = state;
       } else {
         CL.app.lastPack = null;
+        CL.app.planSet = null;
       }
       CL.ui.result.render(res, pack, state);
 

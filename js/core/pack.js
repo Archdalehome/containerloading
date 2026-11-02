@@ -430,7 +430,7 @@
     var opts = state.options || {};
     var allowFill = !!opts.allowFill;
     var items = buildItems(state.rows || [], c);
-    var sorted = items.slice().sort(bySizeDesc);
+    var sorted = items.slice().sort(sortFor(opts.sortBy));
 
     var placements = [];
     var layers = [];
@@ -1050,8 +1050,151 @@
     return errs;
   }
 
+  /* ---------- 多方案枚举 ---------- */
+
+  /** 24 个方案：姿态策略 4 × 排序 3 × 填缝 2 */
+  function planConfigs() {
+    var policies = [
+      { key: 'upright', label: '竖放', allowSide: false, allowFlip: false, dunnage: false },
+      { key: 'side', label: '侧放', allowSide: true, allowFlip: false, dunnage: false },
+      { key: 'pair', label: '对扣', allowSide: false, allowFlip: true, dunnage: false },
+      { key: 'notch', label: '缺口嵌合', allowSide: false, allowFlip: true, dunnage: true }
+    ];
+    var orders = [
+      { key: 'volume', label: '按体积' },
+      { key: 'footprint', label: '按底面积' },
+      { key: 'qty', label: '按数量' }
+    ];
+    var out = [];
+    policies.forEach(function (pol) {
+      orders.forEach(function (ord) {
+        [false, true].forEach(function (fill) {
+          out.push({
+            id: out.length + 1,
+            policy: pol,
+            order: ord,
+            fill: fill,
+            label: pol.label + ' · ' + ord.label + ' · ' + (fill ? '填缝开' : '填缝关')
+          });
+        });
+      });
+    });
+    return out;
+  }
+
+  function sortFor(order) {
+    if (order === 'footprint') {
+      return function (a, b) {
+        var fa = a.bbox.l * a.bbox.w;
+        var fb = b.bbox.l * b.bbox.w;
+        if (fb !== fa) return fb - fa;
+        return bySizeDesc(a, b);
+      };
+    }
+    if (order === 'qty') {
+      return function (a, b) {
+        if (b.qty !== a.qty) return b.qty - a.qty;
+        return bySizeDesc(a, b);
+      };
+    }
+    return bySizeDesc;
+  }
+
+  /** 重心：按单箱重量加权；没填重量时按件数均权 */
+  function cogOf(pack) {
+    var c = pack.container;
+    var byId = {};
+    pack.items.forEach(function (it) { byId[it.id] = it; });
+    var m = 0;
+    var mx = 0;
+    var my = 0;
+    var mz = 0;
+    pack.placements.forEach(function (p) {
+      var it = byId[p.skuId];
+      var w = it && it.unitWeight !== null && it.unitWeight > 0 ? it.unitWeight : 1;
+      m += w;
+      mx += w * (p.x + p.l / 2);
+      my += w * (p.y + p.w / 2);
+      mz += w * (p.z + p.h / 2);
+    });
+    if (!m) return { x: 0, y: 0, z: 0, lateral: 0 };
+    var x = mx / m;
+    var y = my / m;
+    var z = mz / m;
+    return {
+      x: x,
+      y: y,
+      z: z,
+      lateral: c.innerW > 0 ? Math.abs(y - c.innerW / 2) / c.innerW : 0
+    };
+  }
+
+  /** 排名：箱数 → 重心横向偏移 → 净体积 */
+  function rankCompare(a, b) {
+    if (b.boxes !== a.boxes) return b.boxes - a.boxes;
+    if (Math.abs(a.cog.lateral - b.cog.lateral) > 1e-9) return a.cog.lateral - b.cog.lateral;
+    return b.net - a.net;
+  }
+
+  /**
+   * 枚举多方案。方案数按输入规模固定（不按耗时中断，保证可复现）：
+   *   ≤2000 箱 24 个，2000–5000 箱 12 个，>5000 箱 6 个。
+   * 每个方案都跑物理校验，不合法的直接标为无效、不参与排名。
+   */
+  function runPlans(state) {
+    var totalQty = (state.rows || []).reduce(function (s, r) {
+      var q = S.toNum(r.qty);
+      return s + (Number.isFinite(q) ? q : 0);
+    }, 0);
+    var limit = totalQty <= 2000 ? 24 : (totalQty <= 5000 ? 12 : 6);
+    var configs = planConfigs().slice(0, limit);
+    var plans = [];
+
+    configs.forEach(function (cfg) {
+      var rows = (state.rows || []).map(function (r) {
+        return Object.assign({}, r, {
+          allowFlip: cfg.policy.allowFlip,
+          allowSide: cfg.policy.allowSide
+        });
+      });
+      var pack = run({
+        container: state.container || {},
+        rows: rows,
+        options: {
+          allowFill: cfg.fill,
+          allowDunnage: cfg.policy.dunnage,
+          sortBy: cfg.order
+        }
+      });
+      var errs = validatePhysics(pack);
+      var cog = cogOf(pack);
+      plans.push({
+        config: cfg,
+        pack: pack,
+        valid: errs.length === 0,
+        errors: errs,
+        boxes: pack.totals.loadedCount,
+        net: pack.totals.netVolume,
+        fillRate: pack.totals.fillRate,
+        cog: cog
+      });
+    });
+
+    var valid = plans.filter(function (p) { return p.valid; }).sort(rankCompare);
+    return {
+      plans: plans,
+      ranked: valid,
+      best: valid[0] || null,
+      compared: plans.length,
+      limit: limit
+    };
+  }
+
   NS.pack = {
     run: run,
+    runPlans: runPlans,
+    planConfigs: planConfigs,
+    cogOf: cogOf,
     extraContainers: extraContainers,
     suggestFillers: suggestFillers,
     stackDiagnosis: stackDiagnosis,

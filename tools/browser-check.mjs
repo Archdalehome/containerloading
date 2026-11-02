@@ -219,7 +219,9 @@ function pageTestScript() {
 
   const csv = window.CL.report.buildCsv(window.CL.app.lastPack, window.CL.app.state, { extra: window.CL.app.lastPack.extra });
   step('CSV 生成正常（入口等 v2 姿态定稿再开放）', csv.includes('分层小计') && csv.includes('逐箱明细') && csv.includes('列号') && csv.split('\\r\\n').length > 200, '长度 ' + csv.length);
-  step('导出入口暂时收起来', !$('#export-btn'));
+  step('导出入口已开放', !!$('#export-btn') && !$('#export-btn').hidden);
+  click($('#export-btn'));
+  await wait(120);
 
   setVal($('.qty-input', cards()[0]), '1680');
   await calc();
@@ -304,6 +306,14 @@ function pageTestScript() {
   step('3D 画出垫块', window.CL3D._state.dunnageMeshes.length > 0 &&
     window.CL3D._state.dunnageMeshes[0].count > 0,
     window.CL3D._state.dunnageMeshes.length);
+
+  const chips = $$('.plan-chip');
+  step('结果页列出全部方案', chips.length === 24, '方案条 ' + chips.length);
+  if (chips.length > 3) {
+    click(chips[3]);
+    await wait(150);
+    step('点方案条能切换', !!window.CL.app.lastPack, 'lastPack');
+  }
 
   // 11. 校验 localStorage 持久化
   const saved = localStorage.getItem('containerloading.v1');
