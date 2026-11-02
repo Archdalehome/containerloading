@@ -76,13 +76,13 @@
         if (b.boxes !== a.boxes) return b.boxes - a.boxes;
         return a.cog.lateral - b.cog.lateral;
       });
-      html += '<div class="plans"><p class="plans-title">已比较 <b>' + ps.compared + '</b> 种方案，最优 <b>' +
-        (ps.best ? ps.best.boxes : 0) + '</b> 箱' +
+      html += '<div class="plans"><p class="plans-title">已比较 <b>' + ps.compared + '</b> 种方案，' +
+        '零前提最优 <b>' + (ps.best ? ps.best.boxes : 0) + '</b> 箱' +
         (ps.best ? '（' + esc(ps.best.config.label) + '）' : '') + '</p>';
       if (ps.bestGated && (!ps.best || ps.bestGated.boxes > ps.best.boxes)) {
-        html += '<p class="plans-gated">另有方案可装 <b>' + ps.bestGated.boxes +
-          '</b> 箱，但需要自行准备 <b>' + ps.bestGated.dunnageBlocks +
-          '</b> 块垫块（非货品）；勾选「用垫块填平 L 形缺口」后才会作为最优方案。</p>';
+        html += '<p class="plans-gated">若自备 <b>' + ps.bestGated.dunnageBlocks +
+          '</b> 块垫块，可到 <b>' + ps.bestGated.boxes +
+          '</b> 箱（非货品，需自行准备；勾选「用垫块填平 L 形缺口」后才参与最优评选）。</p>';
       }
       html += '<div class="plan-list">';
       sortedPlans.forEach(function (p, idx) {
