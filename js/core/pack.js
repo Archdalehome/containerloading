@@ -335,8 +335,9 @@
     return out;
   }
 
-  /** 台阶不对称的 L 形：有没有别的箱型能正好塞进缺口（有的话就能填平后继续叠） */
-  function notchFillPossible(baseItem, sorted) {
+  /** 台阶不对称的 L 形：有别的箱型能塞缺口，或允许用垫块填平，就能继续往上叠 */
+  function notchFillPossible(baseItem, sorted, allowDunnage) {
+    if (allowDunnage) return true;
     var sv = baseItem.shapeValues;
     var nh = sv.hhigh - sv.hlow;
     for (var i = 0; i < sorted.length; i++) {
@@ -433,6 +434,7 @@
 
     var placements = [];
     var layers = [];
+    var dunnageSurfaces = [];
     var z = 0;
     var usedWeight = 0;
     var loadedCount = 0;
@@ -488,7 +490,7 @@
         // 所以让它们排在最后当顶层的备选，先把高度让给能叠的箱型。
         var topOnly = (it.shape === 'slope' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2)) ||
           (it.shape === 'lshape' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2) &&
-            !notchFillPossible(it, sorted));
+            !notchFillPossible(it, sorted, opts.allowDunnage));
         if (topOnly) {
           if (!slopeFallback) slopeFallback = { item: it, pose: pose };
           continue;
@@ -721,6 +723,22 @@
         }
       }
 
+      // 垫块填平：缺口没有真实小箱可填时，用垫块把台阶缺口垫到 H高（装柜常规做法，不增加货量）
+      var layerDunnage = 0;
+      if (!pair && cand.shape === 'lshape' && opts.allowDunnage) {
+        var svD = cand.shapeValues;
+        var topZ = layerZ + svD.hhigh;
+        placements.forEach(function (q) {
+          if (q.layer !== layerIndex) return;
+          var stq = stepSurface(cand, q);
+          if (!stq) return;
+          if (supportedAt(stq.x, stq.y, stq.l, stq.w, topZ)) return;
+          addSurface(topZ, { x: stq.x, y: stq.y, l: stq.l, w: stq.w });
+          dunnageSurfaces.push({ z: topZ, rect: { x: stq.x, y: stq.y, l: stq.l, w: stq.w } });
+          layerDunnage++;
+        });
+      }
+
       layers.push({
         index: layerIndex,
         skuId: cand.id,
@@ -734,6 +752,7 @@
         rot: pair ? 90 : (candPose.fx === cand.bbox.l ? 0 : 90),
         kind: pair ? 'pair' : (candPose.side ? 'side' : (candPose.flip ? 'flip' : 'normal')),
         fill: layerFill,
+        dunnage: layerDunnage,
         pose: pair ? null : candPose.m
       });
 
@@ -799,6 +818,7 @@
       items: items,
       placements: placements,
       layers: layers,
+      dunnageSurfaces: dunnageSurfaces,
       usedHeight: z,
       containerVolume: containerVolume,
       stop: stop,
@@ -962,6 +982,11 @@
         var k = key(s.z);
         (surface[k] = surface[k] || []).push(s.rect);
       });
+    });
+    // 垫块同样提供水平承重面（不增加货量，但是真实装柜里填平缺口的做法）
+    (pack.dunnageSurfaces || []).forEach(function (s) {
+      var k = key(s.z);
+      (surface[k] = surface[k] || []).push(s.rect);
     });
 
     // 1. 支撑（对扣上件由下件贴合支撑，单独在第 3 条校验）

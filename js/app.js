@@ -86,6 +86,16 @@
       });
     }
 
+    var dunnageToggle = document.getElementById('allow-dunnage');
+    if (dunnageToggle) {
+      dunnageToggle.checked = !!state.options.allowDunnage;
+      dunnageToggle.addEventListener('change', function (e) {
+        state.options.allowDunnage = e.target.checked;
+        ST.save(state);
+        CL.ui.result.markStale();
+      });
+    }
+
     var rowsUI = CL.ui.skuRows.mount(state, {
       onChange: function () {
         ST.save(state);
