@@ -248,6 +248,19 @@ const child = spawn(EDGE, [
 let exitCode = 0;
 let cdp = null;
 
+/** 等页面真正渲染出表单（线上走代理时固定 sleep 不够稳） */
+async function waitForApp(timeoutMs = 25000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    try {
+      const ok = await cdp.evaluate('!!document.getElementById("add-sku") && document.readyState === "complete"');
+      if (ok) return true;
+    } catch (_) { /* 导航中，上下文还没建立 */ }
+    await sleep(250);
+  }
+  return false;
+}
+
 try {
   const list = await waitForJson('http://127.0.0.1:' + PORT + '/json/list');
   const page = list.find((t) => t.type === 'page');
@@ -263,15 +276,11 @@ try {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: 1600, deviceScaleFactor: 1, mobile: WIDTH < 600 });
 
   await cdp.send('Page.navigate', { url: BASE });
-  await sleep(1200);
-  const firstLoad = await cdp.evaluate('({ href: location.href, title: document.title, dom: !!document.getElementById("add-sku") })');
-  if (!firstLoad || !firstLoad.dom) {
-    console.log('页面没加载出来：' + JSON.stringify(firstLoad));
-    throw new Error('页面加载失败，检查地址或网络');
-  }
+  await sleep(600);
+  if (!(await waitForApp())) throw new Error('页面加载失败，检查地址或网络');
   await cdp.evaluate('localStorage.clear(); true');
   await cdp.send('Page.reload', { ignoreCache: true });
-  await sleep(1200);
+  if (!(await waitForApp())) throw new Error('页面重载后没有渲染出来');
 
   const result = await cdp.evaluate(pageTestScript());
 
