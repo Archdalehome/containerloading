@@ -25,6 +25,7 @@ python -m http.server 8080
 ```bash
 node tests/core.test.js          # 纯逻辑：体积、外接尺寸、校验规则（17 项）
 node tools/browser-check.mjs     # 真实浏览器点击测试（22 项）+ 截图，需先起本地服务
+CHECK_WIDTH=390 node tools/browser-check.mjs   # 手机宽度再跑一遍
 ```
 
 `tools/browser-check.mjs` 用 Edge headless + DevTools Protocol 驱动页面：真点按钮、真输入、真触发计算，

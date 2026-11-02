@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const BASE = process.argv[2] || 'http://127.0.0.1:8080/index.html';
 const PORT = 9333;
-const OUT_PNG = path.join(path.dirname(fileURLToPath(import.meta.url)), 'screenshot.png');
+const WIDTH = Number(process.env.CHECK_WIDTH || 1280);
+const OUT_PNG = path.join(path.dirname(fileURLToPath(import.meta.url)), WIDTH === 1280 ? 'screenshot.png' : 'screenshot-' + WIDTH + '.png');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -185,7 +186,7 @@ const child = spawn(EDGE, [
   '--disable-extensions',
   '--remote-debugging-port=' + PORT,
   '--user-data-dir=' + userDir,
-  '--window-size=1280,1600',
+  '--window-size=' + WIDTH + ',1600',
   'about:blank'
 ], { stdio: 'ignore' });
 
@@ -204,7 +205,7 @@ try {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Log.enable');
-  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1600, deviceScaleFactor: 1, mobile: false });
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: 1600, deviceScaleFactor: 1, mobile: WIDTH < 600 });
 
   await cdp.send('Page.navigate', { url: BASE });
   await sleep(1200);
@@ -244,7 +245,7 @@ try {
   const shot = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: true,
-    clip: { x: 0, y: 0, width: 1280, height, scale: 1 }
+    clip: { x: 0, y: 0, width: WIDTH, height, scale: 1 }
   });
   fs.writeFileSync(OUT_PNG, Buffer.from(shot.data, 'base64'));
   console.log('\n  截图：' + OUT_PNG);
