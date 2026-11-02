@@ -308,7 +308,7 @@ function pageTestScript() {
     window.CL3D._state.dunnageMeshes.length);
 
   const chips = $$('.plan-chip');
-  step('结果页列出全部方案', chips.length === 24, '方案条 ' + chips.length);
+  step('结果页列出全部方案', chips.length === 48, '方案条 ' + chips.length);
   if (chips.length > 3) {
     click(chips[3]);
     await wait(150);
@@ -404,6 +404,18 @@ try {
     clip: { x: 0, y: 0, width: WIDTH, height, scale: 1 }
   });
   fs.writeFileSync(OUT_PNG, Buffer.from(shot.data, 'base64'));
+
+  // L 形 + 垫块场景的结果卡片（含方案条）
+  const resultRect = await cdp.evaluate(`(() => {
+    const r = document.getElementById('result-card').getBoundingClientRect();
+    return { x: Math.round(r.left + window.scrollX), y: Math.round(r.top + window.scrollY),
+             width: Math.round(r.width), height: Math.round(r.height) };
+  })()`);
+  const shotL = await cdp.send('Page.captureScreenshot', {
+    format: 'png', captureBeyondViewport: true,
+    clip: { x: resultRect.x, y: resultRect.y, width: resultRect.width, height: Math.min(resultRect.height, 2600), scale: 1 }
+  });
+  fs.writeFileSync(OUT_PNG.replace('.png', '-lshape.png'), Buffer.from(shotL.data, 'base64'));
 
   // 满柜截图（含描边）+ 放大截图，用来验收箱数是否数得清
   const viewerRect = await cdp.evaluate(`(() => {

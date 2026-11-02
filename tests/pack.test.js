@@ -543,7 +543,7 @@ test('runPlans：每个方案都过物理校验，排名按箱数 → 重心 →
     row('c', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 200, '', 'lshape')
   ];
   const ps = P.runPlans(state(C.get('40HQ'), rows, false));
-  assert.strictEqual(ps.compared, 24);
+  assert.strictEqual(ps.compared, 48);
   ps.plans.forEach((p) => {
     assert.deepStrictEqual(p.errors, [], '方案 #' + p.config.id + ' 物理校验未通过');
   });
@@ -582,7 +582,7 @@ test('5000 箱输入：枚举完成且 ≤ 2 秒', () => {
   const t0 = Date.now();
   const ps = P.runPlans(state(C.get('40HQ'), rows, false));
   const ms = Date.now() - t0;
-  assert.strictEqual(ps.compared, 12, '5000 箱档位应为 12 个方案');
+  assert.strictEqual(ps.compared, 24, '5000 箱档位应为 24 个方案');
   assert.ok(ms <= 2000, '耗时 ' + ms + ' ms 超过 2 秒');
   console.log('      5000 箱 × ' + ps.compared + ' 方案耗时 ' + ms + ' ms');
 });

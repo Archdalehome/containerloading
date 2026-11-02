@@ -1054,27 +1054,36 @@
 
   /** 24 个方案：姿态策略 4 × 排序 3 × 填缝 2 */
   function planConfigs() {
+    // 姿态档累加：竖放 ⊂ +侧放 ⊂ +对扣 ⊂ +缺口嵌合；真箱填缺口在所有档里都可用（零前提）
     var policies = [
-      { key: 'upright', label: '竖放', allowSide: false, allowFlip: false, dunnage: false },
-      { key: 'side', label: '侧放', allowSide: true, allowFlip: false, dunnage: false },
-      { key: 'pair', label: '对扣', allowSide: false, allowFlip: true, dunnage: false },
-      { key: 'notch', label: '缺口嵌合', allowSide: false, allowFlip: true, dunnage: true }
+      { key: 'upright', label: '竖放', allowSide: false, allowFlip: false },
+      { key: 'side', label: '+侧放', allowSide: true, allowFlip: false },
+      { key: 'pair', label: '+对扣', allowSide: true, allowFlip: true },
+      { key: 'notch', label: '+缺口嵌合', allowSide: true, allowFlip: true }
     ];
     var orders = [
       { key: 'volume', label: '按体积' },
       { key: 'footprint', label: '按底面积' },
       { key: 'qty', label: '按数量' }
     ];
+    // 垫块是第二维：真箱填缺口 vs 垫块填缺口（后者需要自备垫块，有前提）
+    var dunnageModes = [
+      { dunnage: false, label: '真箱填缺口' },
+      { dunnage: true, label: '垫块填缺口' }
+    ];
     var out = [];
     policies.forEach(function (pol) {
-      orders.forEach(function (ord) {
-        [false, true].forEach(function (fill) {
-          out.push({
-            id: out.length + 1,
-            policy: pol,
-            order: ord,
-            fill: fill,
-            label: pol.label + ' · ' + ord.label + ' · ' + (fill ? '填缝开' : '填缝关')
+      dunnageModes.forEach(function (dm) {
+        orders.forEach(function (ord) {
+          [false, true].forEach(function (fill) {
+            out.push({
+              id: out.length + 1,
+              policy: pol,
+              order: ord,
+              fill: fill,
+              dunnage: dm.dunnage,
+              label: pol.label + ' · ' + dm.label + ' · ' + ord.label + ' · ' + (fill ? '填缝开' : '填缝关')
+            });
           });
         });
       });
@@ -1146,7 +1155,8 @@
       var q = S.toNum(r.qty);
       return s + (Number.isFinite(q) ? q : 0);
     }, 0);
-    var limit = totalQty <= 2000 ? 24 : (totalQty <= 5000 ? 12 : 6);
+    // 方案数按输入规模固定（不按耗时中断）：48 / 24 / 12
+    var limit = totalQty <= 2000 ? 48 : (totalQty <= 5000 ? 24 : 12);
     var configs = planConfigs().slice(0, limit);
     var plans = [];
 
@@ -1162,7 +1172,7 @@
         rows: rows,
         options: {
           allowFill: cfg.fill,
-          allowDunnage: cfg.policy.dunnage,
+          allowDunnage: cfg.dunnage,
           sortBy: cfg.order
         }
       });
