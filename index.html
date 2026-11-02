@@ -92,10 +92,7 @@
   <section class="card hidden" id="result-card">
     <div class="card-head">
       <h2><span class="step">3</span><span id="result-title">校验结果</span></h2>
-      <div class="result-head-right">
-        <span class="hint" id="result-hint"></span>
-        <button type="button" class="btn small" id="export-btn" hidden>导出装柜清单 CSV</button>
-      </div>
+      <span class="hint" id="result-hint"></span>
     </div>
     <div id="result-body"></div>
   </section>
@@ -152,9 +149,9 @@
           排布位置仍按外接长方体紧贴计算。箱体描边是一个整体几何，不会拖慢交互。</p>
       </div>
       <div class="help-item">
-        <h3>导出清单</h3>
-        <p>结果页可以导出 CSV（Excel 直接打开，UTF-8 BOM）：基本信息、分层小计、逐箱明细，
-          明细里带层号、列号、排号与朝向，可直接给装柜工人对照。</p>
+        <h3>装不下时看「所需柜数」</h3>
+        <p>装不完时，结果页会按同规格柜重算剩余货物还需要几个柜，并列出每柜装多少箱；
+          超过门高或底面超尺寸的箱子换柜也装不进，会单独列出来说明要改箱型。</p>
       </div>
     </div>
   </section>

@@ -216,10 +216,8 @@ function pageTestScript() {
   step('所需柜数 2 个 40HQ', $('#result-body').textContent.includes('2 个 40HQ'));
 
   const csv = window.CL.report.buildCsv(window.CL.app.lastPack, window.CL.app.state, { extra: window.CL.app.lastPack.extra });
-  step('导出 CSV 含分层小计与逐箱明细', csv.includes('分层小计') && csv.includes('逐箱明细') && csv.includes('列号') && csv.split('\\r\\n').length > 200, '长度 ' + csv.length);
-  step('导出按钮可见', !$('#export-btn').hidden);
-  click($('#export-btn'));
-  await wait(100);
+  step('CSV 生成正常（入口等 v2 姿态定稿再开放）', csv.includes('分层小计') && csv.includes('逐箱明细') && csv.includes('列号') && csv.split('\\r\\n').length > 200, '长度 ' + csv.length);
+  step('导出入口暂时收起来', !$('#export-btn'));
 
   setVal($('.qty-input', cards()[0]), '1680');
   await calc();
