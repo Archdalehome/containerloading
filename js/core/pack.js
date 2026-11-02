@@ -274,6 +274,88 @@
     return [{ z: p.z + p.h, rect: full }];
   }
 
+  /** 叠放诊断：这个箱型能不能往上叠，为什么 */
+  function stackDiagnosis(item) {
+    var sv = item.shapeValues;
+    if (item.shape === 'rect') {
+      return { code: 'ok', message: '平顶平底，可以正常叠放' };
+    }
+    if (item.shape === 'slope') {
+      return {
+        code: 'pair-only',
+        message: '顶面是斜面，不能承重：单只只能放一层；开启「可倒放」后一正一倒对扣、顶面变平才能继续叠'
+      };
+    }
+    // lshape
+    if (Math.abs(sv.wlow - sv.whigh) <= 1) {
+      return {
+        code: 'pair-ok',
+        message: '台阶对称（W低≈W高），两只一正一倒可拼成矩形，顶面变平后能继续叠'
+      };
+    }
+    var filler = { l: sv.l, w: sv.wlow, h: sv.hhigh - sv.hlow };
+    return {
+      code: 'notch',
+      message: '台阶缺口不承重，平底箱压上去只贴住高段、悬在缺口上，所以同款无法叠放；' +
+        '用 ' + S.num(filler.l) + '×' + S.num(filler.w) + '×' + S.num(filler.h) +
+        ' 的配套箱把缺口填平后可继续叠',
+      filler: filler
+    };
+  }
+
+  /**
+   * 缺口配套箱建议：给「台阶不对称的 L 形」加一个正好填满缺口的配套箱，
+   * 重跑一遍看能多装多少 L 形箱。返回 [{skuId, filler, fillerQty, before, after}]
+   */
+  function suggestFillers(state, pack) {
+    var out = [];
+    var c = parseContainer(state.container || {});
+    (pack.items || []).forEach(function (it) {
+      if (!it.stack || it.stack.code !== 'notch' || !it.stack.filler) return;
+      var f = it.stack.filler;
+      // 解析估算：缺口填平后每层顶面是完整水平面，层高 = H高，可叠 floor(内高 / H高) 层
+      var perLayer = Math.max(0, Math.floor((c.innerL + EPS) / it.bbox.l) * Math.floor((c.innerW + EPS) / it.bbox.w));
+      var layers = Math.max(0, Math.floor((c.innerH + EPS) / it.shapeValues.hhigh));
+      var cap = perLayer * layers;
+      var after = Math.min(it.qty, cap);
+      if (after > it.loaded) {
+        out.push({
+          skuId: it.id,
+          name: it.name || (it.shapeName + ' #' + (it.index + 1)),
+          filler: f,
+          fillerQty: after, // 每个 L 箱配一个正好填满缺口的配套箱
+          before: it.loaded,
+          after: after,
+          delta: after - it.loaded,
+          layers: layers,
+          perLayer: perLayer
+        });
+      }
+    });
+    return out;
+  }
+
+  /** 台阶不对称的 L 形：有没有别的箱型能正好塞进缺口（有的话就能填平后继续叠） */
+  function notchFillPossible(baseItem, sorted) {
+    var sv = baseItem.shapeValues;
+    var nh = sv.hhigh - sv.hlow;
+    for (var i = 0; i < sorted.length; i++) {
+      var o = sorted[i];
+      if (o.id === baseItem.id || o.remaining <= 0 || !o.placeable) continue;
+      if (o.shape === 'slope') continue;
+      var ps = posesFor(o);
+      for (var j = 0; j < ps.length; j++) {
+        var p = ps[j];
+        if (p.thickness <= nh + EPS &&
+            ((p.fx <= sv.l + EPS && p.fy <= sv.wlow + EPS) ||
+             (p.fx <= sv.wlow + EPS && p.fy <= sv.l + EPS))) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /* ---------- 构建 SKU ---------- */
 
   function buildItems(rows, c) {
@@ -329,6 +411,7 @@
             c.key + ' 的 ' + S.num(c.innerL) + '×' + S.num(c.innerW) + ' mm 底面'
         };
       }
+      item.stack = stackDiagnosis(item);
       return item;
     });
   }
@@ -404,7 +487,8 @@
         // 斜顶单只、以及不可对扣的 L 形：顶面不是完整水平面，一旦放上去就不能再叠，
         // 所以让它们排在最后当顶层的备选，先把高度让给能叠的箱型。
         var topOnly = (it.shape === 'slope' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2)) ||
-          (it.shape === 'lshape' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2));
+          (it.shape === 'lshape' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2) &&
+            !notchFillPossible(it, sorted));
         if (topOnly) {
           if (!slopeFallback) slopeFallback = { item: it, pose: pose };
           continue;
@@ -939,6 +1023,8 @@
   NS.pack = {
     run: run,
     extraContainers: extraContainers,
+    suggestFillers: suggestFillers,
+    stackDiagnosis: stackDiagnosis,
     validatePhysics: validatePhysics,
     stepSurface: stepSurface,
     pairFeasible: pairFeasible,

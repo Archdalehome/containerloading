@@ -87,6 +87,18 @@
           : '本柜装 ' + t.loadedCount.toLocaleString('zh-CN') + ' 箱，剩余需 ' + (extra ? extra.count : '?') + ' 个') + '</span></div>' +
       '</div>';
 
+    // 配套箱建议：L 形台阶缺口用配套箱填平后能多装多少
+    if (pack.suggestions && pack.suggestions.length) {
+      html += '<div class="advice">';
+      pack.suggestions.forEach(function (s) {
+        var f = s.filler;
+        html += '<p class="advice-title">加 ' + s.fillerQty + ' 个 ' +
+          S.num(f.l) + '×' + S.num(f.w) + '×' + S.num(f.h) + ' 的配套箱，' +
+          esc(s.name) + ' 能多装 <b>' + s.delta + '</b> 箱（' + s.before + ' → <b>' + s.after + '</b>）</p>';
+      });
+      html += '<p class="advice-sub">原理：台阶缺口填平后这一层顶面变成完整水平面，才能继续往上叠。配套箱尺寸按 L 形缺口算，用户手里通常就有这种配箱。</p></div>';
+    }
+
     // 未装完的必须说清原因，并给出补柜数量
     if (!allLoaded) {
       html += '<div class="warn-box"><p class="warn-title">未装完：' + t.remainingCount + ' 箱（' +
@@ -139,12 +151,17 @@
     // 每 SKU
     html += '<h3 class="block-title">每个箱型的装载结果</h3>' +
       '<div class="table-wrap"><table class="tbl"><thead><tr>' +
-      '<th>#</th><th>箱型</th><th>名称</th><th>外接尺寸 (mm)</th><th>需求</th><th>已装</th><th>剩余</th><th>净体积 (m³)</th><th>说明</th>' +
+      '<th>#</th><th>箱型</th><th>名称</th><th>外接尺寸 (mm)</th><th>需求</th><th>已装</th><th>剩余</th><th>净体积 (m³)</th><th>叠放诊断</th><th>说明</th>' +
       '</tr></thead><tbody>';
     pack.items.forEach(function (it, i) {
       var note = it.remaining > 0
         ? '<span class="bad">' + esc(it.reason ? it.reason.message : '未装入') + '</span>'
         : '<span class="good">已全部装入</span>';
+      var stackMsg = it.stack
+        ? (it.stack.code === 'ok'
+          ? '<span class="good">可叠放</span>'
+          : '<span class="' + (it.stack.code === 'pair-ok' ? 'good' : 'bad') + '">' + esc(it.stack.message) + '</span>')
+        : '—';
       html += '<tr>' +
         '<td class="num">' + (i + 1) + '</td>' +
         '<td>' + esc(it.shapeName) + '</td>' +
@@ -154,6 +171,7 @@
         '<td class="num mono"><b>' + it.loaded.toLocaleString('zh-CN') + '</b></td>' +
         '<td class="num mono">' + (it.remaining > 0 ? '<span class="bad">' + it.remaining + '</span>' : '0') + '</td>' +
         '<td class="num mono">' + m3(it.loaded * it.netVolumeEach) + '</td>' +
+        '<td class="note-cell">' + stackMsg + '</td>' +
         '<td class="note-cell">' + note + '</td>' +
         '</tr>';
     });

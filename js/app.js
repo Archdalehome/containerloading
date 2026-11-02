@@ -191,6 +191,7 @@
       var pack = res.ok ? CL.pack.run(state) : null;
       if (pack) {
         pack.extra = pack.totals.remainingCount > 0 ? CL.pack.extraContainers(state, pack) : null;
+        pack.suggestions = CL.pack.suggestFillers(state, pack);
         CL.app.lastPack = pack;
       } else {
         CL.app.lastPack = null;
