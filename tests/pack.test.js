@@ -12,6 +12,7 @@ const assert = require('assert');
 const S = require('../js/core/shapes.js');
 const C = require('../js/core/containers.js');
 const P = require('../js/core/pack.js');
+const SOLID = require('../js/core/solid.js');
 
 let passed = 0;
 const failures = [];
@@ -362,8 +363,81 @@ test('L 形台阶不对称（160/240）时禁止对扣，退回单放 + 缺口�
   assert.deepStrictEqual(P.validatePhysics(r), []);
 });
 
-test('缺口嵌合：L 形台阶上能塞进小箱，且不悬空', () => {
-  const rows = [
+/* 对扣的实体几何：外接体重叠是对的，实体不许穿插。
+ * 这一段是「纸箱相互侵入」那个线上问题留下的断言——只查外接体永远查不出来。 */
+test('斜顶对扣：两只按真实斜面对扣后实体重叠 0、缝隙 0、顶面平到 800', () => {
+  const r = P.run(state(C.get('40HQ'), [slopeRow(1000, { allowFlip: true })]));
+  const item = r.items[0];
+  const lower = r.placements.find((p) => p.kind === 'pair-lower');
+  const upper = r.placements.find((p) => p.kind === 'pair-upper');
+  assert.ok(lower && upper, '没有生成对扣件');
+  const fit = SOLID.pairFit(lower, upper, item, { step: 5 });
+  assert.ok(fit.overlap <= 1, '实体重叠 ' + fit.overlap.toFixed(3) + ' mm');
+  assert.ok(fit.gap <= 1, '接触面缝隙 ' + fit.gap.toFixed(2) + ' mm');
+  assert.ok(fit.columns > 1000, '采样列太少：' + fit.columns);
+  [5, 200, 400, 595].forEach((x) => {
+    const s = SOLID.spanAt(upper, item, upper.x + x, upper.y + 200);
+    assert.ok(s && Math.abs(s[1] - 800) < 1, '对扣顶面不平，x=' + x + ' 顶高 ' + (s && s[1]));
+    const t = SOLID.spanAt(lower, item, lower.x + x, lower.y + 200);
+    assert.ok(Math.abs(s[0] - t[1]) < 1, '上件底面没贴住下件顶面，x=' + x);
+  });
+});
+
+test('L 形对称台阶对扣：实体重叠 0、缝隙 0（拼成 400×800 实心块）', () => {
+  const rowL = row('l', { L: '600', W: '400', Wlow: '200', Whigh: '200', Hlow: '300', Hhigh: '500' }, 1000, '', 'lshape');
+  rowL.allowFlip = true;
+  const r = P.run(state(C.get('40HQ'), [rowL]));
+  const item = r.items[0];
+  const lower = r.placements.find((p) => p.kind === 'pair-lower');
+  const upper = r.placements.find((p) => p.kind === 'pair-upper-l');
+  assert.ok(lower && upper, '对称台阶没有生成对扣件');
+  const fit = SOLID.pairFit(lower, upper, item, { step: 5 });
+  assert.ok(fit.overlap <= 1, '实体重叠 ' + fit.overlap.toFixed(3) + ' mm');
+  assert.ok(fit.gap <= 1, '接触面缝隙 ' + fit.gap.toFixed(2) + ' mm');
+});
+
+test('反向用例：斜顶对扣若按「镜像宽度」翻转，实体要楔进去约 198mm，必须被 pair-overlap 抓到', () => {
+  // 单独倒放有四种摆法，其中 diag(1,−1,−1) 看起来也是底朝上，但斜顶的坡沿长度方向，
+  // 这种摆法上件的底面是反坡，后半段压进下件 198mm —— 这就是线上「纸箱相互侵入」的真身。
+  const item = {
+    id: 's', shape: 'slope', shapeName: '斜顶箱', index: 0,
+    shapeValues: { l: 600, w: 400, h: 500, hlow: 300, hhigh: 500 },
+    bbox: { l: 600, w: 400, h: 500 }
+  };
+  const pack = {
+    items: [item],
+    placements: [
+      { skuId: 's', x: 0, y: 0, z: 0, l: 600, w: 400, h: 500, layer: 0, kind: 'pair-lower', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      { skuId: 's', x: 0, y: 0, z: 300, l: 600, w: 400, h: 500, layer: 0, kind: 'pair-upper', pose: [1, 0, 0, 0, -1, 0, 0, 0, -1] }
+    ]
+  };
+  const codes = P.validatePhysics(pack).map((e) => e.code);
+  assert.ok(codes.indexOf('pair-overlap') >= 0, '没抓到实体穿插：' + JSON.stringify(codes));
+  const fit = SOLID.pairFit(pack.placements[0], pack.placements[1], item, { step: 10 });
+  assert.ok(fit.overlap > 190, '重叠量应接近 198mm，实际 ' + fit.overlap.toFixed(1));
+});
+
+test('反向用例：不对称 L 形（160/240）镜像翻转后仍然穿插，所以只能靠 pairFeasible 拦下', () => {
+  const item = {
+    id: 'l', shape: 'lshape', shapeName: 'L形箱', index: 1,
+    shapeValues: { l: 600, w: 400, h: 500, wlow: 160, whigh: 240, hlow: 300, hhigh: 500 },
+    bbox: { l: 600, w: 400, h: 500 }
+  };
+  const ok = P.pairFeasible(item);
+  assert.strictEqual(ok, false, '不对称 L 形不该判为可对扣');
+  const pack = {
+    items: [item],
+    placements: [
+      { skuId: 'l', x: 0, y: 0, z: 0, l: 600, w: 400, h: 500, layer: 0, kind: 'pair-lower', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      { skuId: 'l', x: 0, y: 0, z: 300, l: 600, w: 400, h: 500, layer: 0, kind: 'pair-upper-l', pose: [1, 0, 0, 0, -1, 0, 0, 0, -1] }
+    ]
+  };
+  const codes = P.validatePhysics(pack).map((e) => e.code);
+  assert.ok(codes.indexOf('pair-asymmetric-l') >= 0, '没抓到不对称 L 对扣：' + JSON.stringify(codes));
+  assert.ok(codes.indexOf('pair-overlap') >= 0, '不对称 L 硬凑本应实体穿插：' + JSON.stringify(codes));
+});
+
+test('缺口嵌合：L 形台阶上能塞进小箱，且不悬空', () => {  const rows = [
     row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 200, '', 'lshape'),
     row('s', { L: '200', W: '150', H: '200' }, 2000, '', 'rect')
   ];

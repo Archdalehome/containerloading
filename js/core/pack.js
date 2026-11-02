@@ -20,7 +20,9 @@
 
   var NS = (root.CL = root.CL || {});
   if (!NS.shapes && typeof require === 'function') NS.shapes = require('./shapes.js');
+  if (!NS.solid && typeof require === 'function') NS.solid = require('./solid.js');
   var S = NS.shapes;
+  var SOLID = NS.solid;
 
   var EPS = 1e-6;
   var MAX_BOXES = 50000;
@@ -857,15 +859,36 @@
     return null;
   }
 
-  /** 在允许姿态里找「底面朝上」的那一个（对扣上件用，必须与下件同底面积） */
+  /**
+   * 对扣上件的姿态：必须与下件同底面积、底面朝上，并且**翻转要沿剖面变化的那根轴**。
+   *
+   * 为什么不能随便找一个倒放姿态：倒放有四种摆法，其中两种看起来都是「底朝上」，
+   * 但只有一种能把两只箱子拼成实心块：
+   *   斜顶箱的高度沿**长度**变化 → 必须同时镜像长度方向（否则上件的底面是反坡，
+   *                            后半段要压进下件 200mm，3D 里就是两只箱子互相侵入）
+   *   L 形箱的台阶沿**深度**变化 → 必须同时镜像深度方向（对称台阶才对得上）
+   *   矩形箱没有方向 → 按长度镜像
+   * 做法：把「箱高轴」和「剖面轴」两行同时取反。两行取反行列式不变，仍是合法旋转。
+   */
   function findFlipPose(item, refPose) {
-    var poses = posesFor(item);
-    for (var i = 0; i < poses.length; i++) {
-      var p = poses[i];
-      if (!p.flip || p.vertical !== 2) continue;
-      if (Math.abs(p.fx - refPose.fx) < EPS && Math.abs(p.fy - refPose.fy) < EPS) return p;
+    if (!refPose) return null;
+    var prof = item.shape === 'lshape' ? 1 : 0;
+    var m = refPose.m.slice();
+    for (var a = 0; a < 3; a++) {
+      m[2 * 3 + a] = -m[2 * 3 + a];
+      m[prof * 3 + a] = -m[prof * 3 + a];
     }
-    return null;
+    var pose = SOLID.poseFromMatrix(m);
+    var dims = poseDims(item, pose);
+    pose.fx = dims.fx;
+    pose.fy = dims.fy;
+    pose.thickness = dims.thickness;
+    pose.side = false;
+    pose.flip = true;
+    pose.vertical = 2;
+    if (Math.abs(pose.fx - refPose.fx) > EPS || Math.abs(pose.fy - refPose.fy) > EPS) return null;
+    if (pose.m[8] !== -1) return null;
+    return pose;
   }
 
   /** 给一条余缝挑填缝箱：厚度不超过本层，格数最多 */
@@ -976,6 +999,7 @@
     var itemsById = {};
     (pack.items || []).forEach(function (it) { itemsById[it.id] = it; });
     var surface = {};
+    var pairCache = {}; // 同一 SKU 的所有对扣件相对关系相同，实体采样只算一次
     function key(h) { return Math.round(h * 1000); }
     function pushSurface(z, r) {
       var k = key(z);
@@ -1044,6 +1068,27 @@
       }
       if (it && it.shape === 'lshape' && Math.abs(it.shapeValues.wlow - it.shapeValues.whigh) > 1) {
         errs.push({ code: 'pair-asymmetric-l', message: '不对称 L 形不允许对扣', placement: u });
+      }
+      // 4. 实体检查：外接体重叠是对的（下件 0..500、上件 300..800），但实体不许穿插。
+      //    翻转方向选错时外接体看着没问题、实体却楔进去 200mm，所以这一条必须按实体采样验。
+      if (it) {
+        var cacheKey = u.skuId + '|' + (u.z - l.z) + '|' + (u.x - l.x) + '|' + (u.y - l.y);
+        var fit = pairCache[cacheKey];
+        if (!fit) {
+          fit = SOLID.pairFit(l, u, it, { step: 10, tol: 1 });
+          pairCache[cacheKey] = fit;
+        }
+        if (fit.overlap > 1) {
+          errs.push({
+            code: 'pair-overlap',
+            message: '对扣两箱实体重叠 ' + S.num(fit.overlap) + ' mm（翻转方向或上件高度不对）',
+            placement: u
+          });
+        } else if (fit.columns === 0) {
+          errs.push({ code: 'pair-nocontact', message: '对扣两箱实体没有接触面', placement: u });
+        } else if (fit.gap > 1) {
+          errs.push({ code: 'pair-seam', message: '对扣接触面有 ' + S.num(fit.gap) + ' mm 缝隙', placement: u });
+        }
       }
     });
 

@@ -254,6 +254,9 @@
       '排布按外接长方体占位；L形箱/斜顶箱的 3D 几何按真实形状渲染（M3）。' +
       (pack.truncated ? ' 本次结果已截断。' : '') +
       '</div>';
+
+    // 本单体检：由 js/ui/health.js 在 3D 建好之后填（这里只留挂载点）
+    html += '<div id="health-box" class="health"></div>';
     return html;
   }
 

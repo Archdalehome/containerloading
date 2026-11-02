@@ -158,10 +158,16 @@
       if (!root.CL3D) {
         // viewer.js 是 module，正常会在 DOMContentLoaded 之前执行完；没加载成功时给个说明
         host.innerHTML = '<div class="viewer-error">3D 模块没有加载成功，刷新页面再试。</div>';
+        if (CL.ui.health) CL.ui.health.render(pack);
         return;
       }
-      if (!root.CL3D.isReady() && !root.CL3D.init(host)) return;
+      if (!root.CL3D.isReady() && !root.CL3D.init(host)) {
+        if (CL.ui.health) CL.ui.health.render(pack);
+        return;
+      }
       root.CL3D.build(pack);
+      // 体检要读真实 3D 场景，必须在 build 之后
+      if (CL.ui.health) CL.ui.health.render(pack);
     }
 
     function hideViewer() {
@@ -174,7 +180,10 @@
       var p = pendingPack;
       pendingPack = null;
       var host = document.getElementById('viewer-canvas');
-      if (root.CL3D.init(host)) root.CL3D.build(p);
+      if (root.CL3D.init(host)) {
+        root.CL3D.build(p);
+        if (CL.ui.health) CL.ui.health.render(p);
+      }
     });
 
     // 方案切换：点结果页的方案条

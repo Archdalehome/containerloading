@@ -195,6 +195,12 @@
         <p>装不完时，结果页会按同规格柜重算剩余货物还需要几个柜，并列出每柜装多少箱；
           超过门高或底面超尺寸的箱子换柜也装不进，会单独列出来说明要改箱型。</p>
       </div>
+      <div class="help-item">
+        <h3>结果页最下面的「本单体检」</h3>
+        <p>四项：越界箱数、两两重叠、悬空 / 压斜面、渲染与占位的最大偏差，<b>都应该是 0</b>。
+          不是 0 时会写明第几层哪一箱、哪个坐标差多少——把那一栏截图发过来就能直接定位，
+          不用再复述参数。</p>
+      </div>
     </div>
   </section>
 
@@ -207,12 +213,14 @@
 <script src="js/core/shapes.js"></script>
 <script src="js/core/containers.js"></script>
 <script src="js/core/validate.js"></script>
+<script src="js/core/solid.js"></script>
 <script src="js/core/pack.js"></script>
 <script src="js/core/report.js"></script>
 <script src="js/core/storage.js"></script>
 <script src="js/ui/container-panel.js"></script>
 <script src="js/ui/sku-rows.js"></script>
 <script src="js/ui/result.js"></script>
+<script src="js/ui/health.js"></script>
 <script src="js/ui/export-csv.js"></script>
 <script src="js/app.js"></script>
 <script type="module" src="js/ui/viewer.js"></script>

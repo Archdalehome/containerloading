@@ -106,70 +106,58 @@ function geometryFor(item) {
   return geo;
 }
 
-/* ---------- 描边几何（按 SKU+层 合并成 LineSegments，不是每箱一次 draw call） ---------- */
+/* ---------- 描边几何（直接由箱体几何生成，只有一条变换链） ---------- */
 
 const EDGE_LIFT = 1.004; // 描边轻微外扩，避免和箱体表面 z-fighting
 
-/** 截面多边形（[z,y] 点列）沿 x 轴挤出成棱柱的棱 */
-function prismEdges(points, L) {
-  const out = [];
-  for (let s = 0; s < 2; s++) {
-    const x = s === 0 ? -L / 2 : L / 2;
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i];
-      const q = points[(i + 1) % points.length];
-      out.push(x, p[1], p[0], x, q[1], q[0]);
-    }
+/**
+ * 棱线 = 箱体几何的 EdgesGeometry，再按包围盒中心整体外扩 EDGE_LIFT。
+ * 这样描边和箱体永远共用同一份顶点与同一条变换链，不会因为「自己算模板坐标」再分叉。
+ * （上一版用 prismEdges 手搭模板 + 单独乘姿态矩阵，在倒放姿态下对不上，差出一个 H低。）
+ */
+function edgesGeometryFor(geo) {
+  const eg = new THREE.EdgesGeometry(geo, 1);
+  eg.computeBoundingBox();
+  const bb = eg.boundingBox;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  const cy = (bb.min.y + bb.max.y) / 2;
+  const cz = (bb.min.z + bb.max.z) / 2;
+  const pos = eg.attributes.position;
+  for (let i = 0; i < pos.array.length; i += 3) {
+    pos.array[i] = cx + (pos.array[i] - cx) * EDGE_LIFT;
+    pos.array[i + 1] = cy + (pos.array[i + 1] - cy) * EDGE_LIFT;
+    pos.array[i + 2] = cz + (pos.array[i + 2] - cz) * EDGE_LIFT;
   }
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i];
-    out.push(-L / 2, p[1], p[0], L / 2, p[1], p[0]);
-  }
-  return out;
+  pos.needsUpdate = true;
+  eg.computeBoundingBox();
+  return eg;
 }
 
-function edgeTemplateFor(item) {
-  const sv = item.shapeValues || item.bbox;
-  if (item.shape === 'lshape') {
-    const H = sv.h;
-    const W = sv.w;
-    const zLow = -W / 2 + sv.wlow;
-    return prismEdges([
-      [-W / 2, -H / 2],
-      [W / 2, -H / 2],
-      [W / 2, H / 2],
-      [zLow, H / 2],
-      [zLow, sv.hlow - H / 2],
-      [-W / 2, sv.hlow - H / 2]
-    ], sv.l);
-  }
-  if (item.shape === 'slope') {
-    const L = sv.l;
-    const W = sv.w;
-    const H = sv.h;
-    const x0 = -L / 2;
-    const x1 = L / 2;
-    const z0 = -W / 2;
-    const z1 = W / 2;
-    const bottom = [[x0, -H / 2, z0], [x1, -H / 2, z0], [x1, -H / 2, z1], [x0, -H / 2, z1]];
-    const top = [[x0, sv.hlow - H / 2, z0], [x1, H / 2, z0], [x1, H / 2, z1], [x0, sv.hlow - H / 2, z1]];
-    const out = [];
-    const seg = (a, b) => out.push(a[0], a[1], a[2], b[0], b[1], b[2]);
-    for (let i = 0; i < 4; i++) {
-      seg(bottom[i], bottom[(i + 1) % 4]);
-      seg(top[i], top[(i + 1) % 4]);
-      seg(bottom[i], top[i]);
+/** 同一组（同 SKU、同层、同姿态）的箱子棱线合并进一个 LineSegments。 */
+function makeEdges(item, list, edgesGeo, L, W) {
+  const src = edgesGeo.attributes.position.array;
+  const n = src.length;
+  const positions = new Float32Array(list.length * n);
+  list.forEach((p, i) => {
+    const cx = p.x + p.l / 2 - L / 2;
+    const cy = p.z + p.h / 2;
+    const cz = p.y + p.w / 2 - W / 2;
+    const base = i * n;
+    for (let k = 0; k < n; k += 3) {
+      positions[base + k] = src[k] + cx;
+      positions[base + k + 1] = src[k + 1] + cy;
+      positions[base + k + 2] = src[k + 2] + cz;
     }
-    return out;
-  }
-  const H = sv.h;
-  const W = sv.w;
-  return prismEdges([
-    [-W / 2, -H / 2],
-    [W / 2, -H / 2],
-    [W / 2, H / 2],
-    [-W / 2, H / 2]
-  ], sv.l);
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const lines = new THREE.LineSegments(
+    geo,
+    new THREE.LineBasicMaterial({ color: 0x123a63, transparent: true, opacity: 0.7 })
+  );
+  lines.frustumCulled = false;
+  lines.userData = { skuId: item.id, layer: list[0].layer + 1, baseOpacity: 0.7, perBox: n };
+  return lines;
 }
 
 /** 姿态矩阵：容器轴（x长 y宽 z高）→ three 轴（X长 Y高 Z宽）的共轭变换 */
@@ -192,44 +180,6 @@ function matrix4FromR3(r) {
     0, 0, 0, 1
   );
   return out;
-}
-
-/** 同一组（同 SKU、同层、同姿态）的箱子边合并进一个 BufferGeometry。
- *  坐标链与箱体完全一致：模板本身就在 (x=长, y=高, z=宽) 的 three 局部系里，
- *  直接乘 poseMatrix3（它已经做过 y/z 共轭），不要再交换一次。 */
-function makeEdges(item, list, sx, sy, sz, pose, L, W) {
-  const tmpl = edgeTemplateFor(item);
-  const r3 = poseMatrix3(pose);
-  const coords = new Float32Array(tmpl.length);
-  for (let k = 0; k < tmpl.length; k += 3) {
-    const x0 = tmpl[k] * sx * EDGE_LIFT;
-    const y0 = tmpl[k + 1] * sy * EDGE_LIFT;
-    const z0 = tmpl[k + 2] * sz * EDGE_LIFT;
-    coords[k] = r3[0] * x0 + r3[1] * y0 + r3[2] * z0;
-    coords[k + 1] = r3[3] * x0 + r3[4] * y0 + r3[5] * z0;
-    coords[k + 2] = r3[6] * x0 + r3[7] * y0 + r3[8] * z0;
-  }
-  const positions = new Float32Array(list.length * coords.length);
-  list.forEach((p, i) => {
-    const cx = p.x + p.l / 2 - L / 2;
-    const cy = p.z + p.h / 2;
-    const cz = p.y + p.w / 2 - W / 2;
-    const base = i * coords.length;
-    for (let k = 0; k < coords.length; k += 3) {
-      positions[base + k] = coords[k] + cx;
-      positions[base + k + 1] = coords[k + 1] + cy;
-      positions[base + k + 2] = coords[k + 2] + cz;
-    }
-  });
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const lines = new THREE.LineSegments(
-    geo,
-    new THREE.LineBasicMaterial({ color: 0x123a63, transparent: true, opacity: 0.7 })
-  );
-  lines.frustumCulled = false;
-  lines.userData = { skuId: item.id, layer: list[0].layer + 1, baseOpacity: 0.7 };
-  return lines;
 }
 
 /* ---------- 容器 ---------- */
@@ -440,21 +390,17 @@ function buildInstanced(pack) {
     const item = pack.items.find((it) => it.id === list[0].skuId);
     if (!item) return;
 
-    // 与 geometryFor 用同一套缝隙缩放，描边才贴合箱体
-    const sv = item.shapeValues || item.bbox;
-    const gap = 4;
-    const sx = sv.l > gap * 2 ? (sv.l - gap) / sv.l : 0.9;
-    const sy = sv.h > gap * 2 ? (sv.h - gap) / sv.h : 0.9;
-    const sz = sv.w > gap * 2 ? (sv.w - gap) / sv.w : 0.9;
-
     const pose = list[0].pose || [1, 0, 0, 0, 1, 0, 0, 0, 1];
     const cacheKey = item.id + '|' + pose.join(',');
-    let geo = geomCache.get(cacheKey);
-    if (!geo) {
-      geo = geometryFor(item);
+    let entry = geomCache.get(cacheKey);
+    if (!entry) {
+      // 箱体几何带上姿态和 4mm 视觉缝；描边直接由这份几何生成，两者不可能再分叉
+      const geo = geometryFor(item);
       geo.applyMatrix4(matrix4FromR3(poseMatrix3(pose)));
-      geomCache.set(cacheKey, geo);
+      entry = { geo, edges: edgesGeometryFor(geo) };
+      geomCache.set(cacheKey, entry);
     }
+    const geo = entry.geo;
 
     const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(colorFor(item.index)) });
     const mesh = new THREE.InstancedMesh(geo, mat, list.length);
@@ -473,7 +419,7 @@ function buildInstanced(pack) {
     S.meshes.push(mesh);
 
     // 描边合并：一箱一个 LineSegments 会有上千 draw call，这里按组只提交一个
-    const lines = makeEdges(item, list, sx, sy, sz, pose, L, W);
+    const lines = makeEdges(item, list, entry.edges, L, W);
     S.root.add(lines);
     S.lines.push(lines);
   });

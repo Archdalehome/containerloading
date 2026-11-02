@@ -88,8 +88,9 @@ function pageTestScript() {
   const card = (i) => cards()[i];
   const calc = async () => { click($('#calc-btn')); await wait(60); };
 
-  /** 渲染层自检：每个实例的 AABB 必须等于占位矩形（每边缩 4mm 视觉缝），且两两不相交；
-   *  描边几何的包围盒必须和箱体一致（防止两条变换链分叉）。 */
+  /** 渲染层自检：每个实例的 AABB 必须等于占位矩形（每边缩 4mm 视觉缝）、必须落在柜内腔里、
+   *  两两不相交；描边逐个实例与箱体比（描边 = 箱体包围盒 × 1.004）。
+   *  这些都从真实 3D 场景量，不看排布数据——数据对、渲染错也能抓出来。 */
   function renderCheck(pack, label) {
     const st = window.CL3D._state;
     const T = window.CL3D.THREE;
@@ -103,7 +104,12 @@ function pageTestScript() {
       map.get(k).push(p);
     });
     let maxErr = 0;
+    let edgeMaxErr = 0;
+    let edgeMaxWhere = '';
+    let outOfBounds = 0;
+    let firstOob = '';
     const boxes = [];
+    const expectedBoxes = [];
     meshes.forEach((m, gi) => {
       const list = map.get(groups[gi]);
       if (!list) return;
@@ -125,7 +131,65 @@ function pageTestScript() {
           Math.abs((bb.max.z - bb.min.z) - (p.w - 4))
         );
         if (err > maxErr) maxErr = err;
+        // 柜内腔：three 的 x = 容器长（居中），y = 容器高（从柜底起），z = 容器宽（居中）
+        const x0 = bb.min.x + c.innerL / 2;
+        const x1 = bb.max.x + c.innerL / 2;
+        const y0 = bb.min.z + c.innerW / 2;
+        const y1 = bb.max.z + c.innerW / 2;
+        const over = Math.max(
+          -x0, x1 - c.innerL,
+          -y0, y1 - c.innerW,
+          -bb.min.y, bb.max.y - c.innerH
+        );
+        if (over > 1) {
+          outOfBounds++;
+          if (!firstOob) {
+            firstOob = '第 ' + (p.layer + 1) + ' 层 ' + p.skuId + ' at x=' + p.x + ' y=' + p.y + ' z=' + p.z +
+              ' → 越界 ' + over.toFixed(2) + ' mm';
+          }
+        }
         boxes.push({ min: bb.min, max: bb.max, p });
+        expectedBoxes.push({ min: bb.min.clone(), max: bb.max.clone() });
+      }
+    });
+
+    // 描边：逐实例比对（每个箱子的棱线包围盒必须是它自己箱体包围盒 × 1.004）
+    st.lines.forEach((ln, li) => {
+      const list = map[groups[li]];
+      const mesh = meshes[li];
+      if (!list || !mesh) return;
+      const perBox = ln.userData.perBox || 0;
+      if (!perBox) return;
+      const pos = ln.geometry.attributes.position;
+      const m4 = new T.Matrix4();
+      for (let i = 0; i < list.length; i++) {
+        mesh.getMatrixAt(i, m4);
+        const bb = mesh.geometry.boundingBox.clone().applyMatrix4(m4);
+        const sc = { x: (bb.max.x - bb.min.x) / 2, y: (bb.max.y - bb.min.y) / 2, z: (bb.max.z - bb.min.z) / 2 };
+        const ct = { x: (bb.max.x + bb.min.x) / 2, y: (bb.max.y + bb.min.y) / 2, z: (bb.max.z + bb.min.z) / 2 };
+        let mn = { x: Infinity, y: Infinity, z: Infinity };
+        let mx = { x: -Infinity, y: -Infinity, z: -Infinity };
+        const base = i * perBox;
+        for (let k = 0; k < perBox; k++) {
+          const x = pos.getX(base + k);
+          const y = pos.getY(base + k);
+          const z = pos.getZ(base + k);
+          if (x < mn.x) mn.x = x; if (x > mx.x) mx.x = x;
+          if (y < mn.y) mn.y = y; if (y > mx.y) mx.y = y;
+          if (z < mn.z) mn.z = z; if (z > mx.z) mx.z = z;
+        }
+        const e = Math.max(
+          Math.abs((mn.x + mx.x) / 2 - ct.x),
+          Math.abs((mn.y + mx.y) / 2 - ct.y),
+          Math.abs((mn.z + mx.z) / 2 - ct.z),
+          Math.abs((mx.x - mn.x) - sc.x * 2 * 1.004),
+          Math.abs((mx.y - mn.y) - sc.y * 2 * 1.004),
+          Math.abs((mx.z - mn.z) - sc.z * 2 * 1.004)
+        );
+        if (e > edgeMaxErr) {
+          edgeMaxErr = e;
+          edgeMaxWhere = '第 ' + (list[i].layer + 1) + ' 层 第 ' + (i + 1) + ' 箱';
+        }
       }
     });
 
@@ -135,7 +199,7 @@ function pageTestScript() {
         const a = boxes[i];
         const b = boxes[j];
         if (a.p.layer === b.p.layer && (
-          (a.p.kind === 'pair-lower' && b.p.kind.indexOf('pair-upper') === 0) ||
+          (a.p.kind === 'pair-lower' && (b.p.kind === 'pair-upper' || b.p.kind === 'pair-upper-l')) ||
           (a.p.kind.indexOf('pair-upper') === 0 && b.p.kind === 'pair-lower') ||
           a.p.kind === 'notch' || b.p.kind === 'notch')) continue;
         const ox = Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x);
@@ -145,34 +209,7 @@ function pageTestScript() {
       }
     }
 
-    // 描边与箱体：按层比较包围盒（描边有 0.4% 外扩，给 3mm 容差）
-    let edgeErr = 0;
-    const byLayer = {};
-    boxes.forEach((b) => {
-      const k = b.p.layer;
-      byLayer[k] = byLayer[k] || { min: [1e9, 1e9, 1e9], max: [-1e9, -1e9, -1e9] };
-      byLayer[k].min[0] = Math.min(byLayer[k].min[0], b.min.x);
-      byLayer[k].min[1] = Math.min(byLayer[k].min[1], b.min.y);
-      byLayer[k].min[2] = Math.min(byLayer[k].min[2], b.min.z);
-      byLayer[k].max[0] = Math.max(byLayer[k].max[0], b.max.x);
-      byLayer[k].max[1] = Math.max(byLayer[k].max[1], b.max.y);
-      byLayer[k].max[2] = Math.max(byLayer[k].max[2], b.max.z);
-    });
-    st.lines.forEach((ln) => {
-      if (!ln.geometry.boundingBox) ln.geometry.computeBoundingBox();
-      const bb = ln.geometry.boundingBox;
-      const g = byLayer[ln.userData.layer - 1];
-      if (!g) return;
-      edgeErr = Math.max(edgeErr,
-        Math.abs((bb.min.x + bb.max.x) / 2 - (g.min[0] + g.max[0]) / 2),
-        Math.abs((bb.min.y + bb.max.y) / 2 - (g.min[1] + g.max[1]) / 2),
-        Math.abs((bb.min.z + bb.max.z) / 2 - (g.min[2] + g.max[2]) / 2),
-        Math.abs((bb.max.x - bb.min.x) - (g.max[0] - g.min[0])),
-        Math.abs((bb.max.y - bb.min.y) - (g.max[1] - g.min[1])),
-        Math.abs((bb.max.z - bb.min.z) - (g.max[2] - g.min[2]))
-      );
-    });
-    return { maxErr, overlaps, edgeErr, count: boxes.length, label: label || '' };
+    return { maxErr, overlaps, edgeErr: edgeMaxErr, edgeWhere: edgeMaxWhere, outOfBounds, firstOob, count: boxes.length, label: label || '' };
   }
 
   await wait(120);
@@ -273,8 +310,12 @@ function pageTestScript() {
   await wait(500);
   const rcNormal = renderCheck(window.CL.app.lastPack, 'normal');
   step('渲染 AABB 与占位矩形一致（正放 1680 箱）', rcNormal.maxErr < 1, '误差 ' + rcNormal.maxErr.toFixed(2) + ' mm');
+  step('渲染箱体全在柜内腔（正放 1680 箱）', rcNormal.outOfBounds === 0, rcNormal.firstOob || '越界 0 箱');
   step('渲染箱体两两不相交（正放）', rcNormal.overlaps === 0, '重叠 ' + rcNormal.overlaps);
-  step('描边与箱体包围盒一致（正放）', rcNormal.edgeErr < 3, '偏差 ' + rcNormal.edgeErr.toFixed(2) + ' mm');
+  step('描边与箱体包围盒一致（正放）', rcNormal.edgeErr < 1, '偏差 ' + rcNormal.edgeErr.toFixed(2) + ' mm ' + rcNormal.edgeWhere);
+  const healthText = ($('#health-box') || {}).textContent || '';
+  step('本单体检四项全 0', healthText.includes('越界箱数') && healthText.includes('全部通过'),
+    healthText.replace(/\s+/g, ' ').slice(0, 120));
 
   // 9. 3D 图
   await wait(400);
@@ -352,8 +393,22 @@ function pageTestScript() {
   await wait(500);
   const rcPair = renderCheck(pairPack, 'pair');
   step('渲染 AABB 与占位矩形一致（对扣 / 倒放件）', rcPair.maxErr < 1, '误差 ' + rcPair.maxErr.toFixed(2) + ' mm');
+  step('渲染箱体全在柜内腔（对扣 / 倒放件）', rcPair.outOfBounds === 0, rcPair.firstOob || '越界 0 箱');
   step('渲染箱体两两不相交（对扣 / 倒放件）', rcPair.overlaps === 0, '重叠 ' + rcPair.overlaps);
-  step('描边与箱体包围盒一致（对扣 / 倒放件）', rcPair.edgeErr < 3, '偏差 ' + rcPair.edgeErr.toFixed(2) + ' mm');
+  step('描边与箱体包围盒一致（对扣 / 倒放件）', rcPair.edgeErr < 1, '偏差 ' + rcPair.edgeErr.toFixed(2) + ' mm ' + rcPair.edgeWhere);
+
+  // 对扣实体：上件底面必须贴住下件斜面，不许楔进去（线上「相互侵入」的根）
+  const pairSolid = (() => {
+    const low = pairPack.placements.find((p) => p.kind === 'pair-lower');
+    const up = pairPack.placements.find((p) => p.kind === 'pair-upper');
+    if (!low || !up || !window.CL.solid) return null;
+    const item = pairPack.items.find((i) => i.id === up.skuId);
+    const fit = window.CL.solid.pairFit(low, up, item, { step: 5 });
+    return { overlap: fit.overlap, gap: fit.gap, columns: fit.columns, pose: up.pose.join(',') };
+  })();
+  step('对扣实体不穿插、接触面贴合', !!pairSolid && pairSolid.overlap <= 1 && pairSolid.gap <= 1,
+    pairSolid ? '重叠 ' + pairSolid.overlap.toFixed(2) + ' mm / 缝隙 ' + pairSolid.gap.toFixed(2) +
+      ' mm / 上件姿态 ' + pairSolid.pose : '无对扣件');
 
   await wait(500);
   const geoCheck = (() => {
@@ -409,6 +464,7 @@ function pageTestScript() {
   await wait(300);
   const rcDun = renderCheck(dnPack, 'dunnage');
   step('渲染 AABB 与占位矩形一致（L 形 + 垫块）', rcDun.maxErr < 1, '误差 ' + rcDun.maxErr.toFixed(2) + ' mm');
+  step('渲染箱体全在柜内腔（L 形 + 垫块）', rcDun.outOfBounds === 0, rcDun.firstOob || '越界 0 箱');
   step('渲染箱体两两不相交（L 形 + 垫块）', rcDun.overlaps === 0, '重叠 ' + rcDun.overlaps);
 
   // 侧放姿态：100×100×2000 开可侧放
@@ -427,8 +483,43 @@ function pageTestScript() {
   await wait(400);
   const rcSide = renderCheck(window.CL.app.lastPack, 'side');
   step('渲染 AABB 与占位矩形一致（侧放）', rcSide.maxErr < 1, '误差 ' + rcSide.maxErr.toFixed(2) + ' mm');
+  step('渲染箱体全在柜内腔（侧放）', rcSide.outOfBounds === 0, rcSide.firstOob || '越界 0 箱');
   step('渲染箱体两两不相交（侧放）', rcSide.overlaps === 0, '重叠 ' + rcSide.overlaps);
-  step('描边与箱体包围盒一致（侧放）', rcSide.edgeErr < 3, '偏差 ' + rcSide.edgeErr.toFixed(2) + ' mm');
+  step('描边与箱体包围盒一致（侧放）', rcSide.edgeErr < 1, '偏差 ' + rcSide.edgeErr.toFixed(2) + ' mm ' + rcSide.edgeWhere);
+
+  // 用户截图那一类现场：40GP（内高 2393）+ 满柜，验证「超出柜底 / 相互侵入」不再出现
+  click($('.shape-tab[data-shape="rect"]', cards()[0]));
+  await wait(80);
+  setField(0, 'L', '400');
+  setField(0, 'W', '300');
+  setField(0, 'H', '300');
+  const sideReset = $('.opt-side', cards()[0]);
+  if (sideReset && sideReset.checked) {
+    sideReset.checked = false;
+    sideReset.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  const flipReset = $('.opt-flip', cards()[0]);
+  if (flipReset && flipReset.checked) {
+    flipReset.checked = false;
+    flipReset.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  // 双保险：勾选框在重渲染后可能已经换了一个元素，直接改状态
+  window.CL.app.state.rows[0].allowSide = false;
+  window.CL.app.state.rows[0].allowFlip = false;
+  click($('.preset[data-key="40GP"]'));
+  await wait(80);
+  setVal($('.qty-input', cards()[0]), '1680');
+  await calc();
+  await wait(400);
+  const rc40gp = renderCheck(window.CL.app.lastPack, '40gp');
+  step('40GP 满柜：枚举最优 1610 箱（竖放基准 7 层 1470）', window.CL.app.lastPack.totals.loadedCount === 1610,
+    '已装 ' + window.CL.app.lastPack.totals.loadedCount + ' 箱 / ' + window.CL.app.lastPack.layers.length +
+    ' 层 / 姿态 ' + window.CL.app.lastPack.layers.map((l) => l.kind).join(','));
+  step('40GP 渲染箱体全在柜内腔（不低于柜底、不超柜顶）', rc40gp.outOfBounds === 0, rc40gp.firstOob || '越界 0 箱');
+  step('40GP 渲染箱体两两不相交', rc40gp.overlaps === 0, '重叠 ' + rc40gp.overlaps);
+  step('40GP 描边与箱体一致', rc40gp.edgeErr < 1, '偏差 ' + rc40gp.edgeErr.toFixed(2) + ' mm');
+  const health40 = ($('#health-box') || {}).textContent || '';
+  step('40GP 本单体检四项全 0', health40.includes('全部通过'), health40.replace(/\s+/g, ' ').slice(0, 120));
 
   const chips = $$('.plan-chip');
   step('结果页列出全部方案', chips.length === 48, '方案条 ' + chips.length);
@@ -693,6 +784,48 @@ try {
     console.log('  3D 截图：' + OUT_PNG + ' / ' + out2 + ' / ' + out3);
   } else {
     failed++;
+  }
+
+  // 对扣特写：一正一倒两只斜顶箱拼成的实心块，用来肉眼确认没有互相侵入
+  const pairShot = await cdp.evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const $ = (s) => document.querySelector(s);
+    const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+    const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const setVal = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    while ($$('.sku-card').length > 1) { click($$('.sku-card')[$$('.sku-card').length - 1].querySelector('[data-act="delete"]')); await wait(30); }
+    let c0 = $$('.sku-card')[0];
+    const id0 = c0.dataset.id;
+    click(c0.querySelector('.shape-tab[data-shape="slope"]'));
+    await wait(80);
+    c0 = document.querySelector('.sku-card[data-id="' + id0 + '"]');
+    setVal(c0.querySelector('.v-input[data-key="L"]'), '600');
+    setVal(c0.querySelector('.v-input[data-key="W"]'), '400');
+    setVal(c0.querySelector('.v-input[data-key="Hlow"]'), '300');
+    setVal(c0.querySelector('.v-input[data-key="Hhigh"]'), '500');
+    setVal(c0.querySelector('.qty-input'), '400');
+    click($('#calc-btn'));
+    await wait(700);
+    const sel = document.getElementById('layer-select');
+    if (sel) { sel.value = '1'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (window.CL3D) window.CL3D.setView({ theta: 0.92, phi: 1.02, radius: 4200 });
+    await wait(400);
+    const r = document.getElementById('viewer-card').getBoundingClientRect();
+    return {
+      x: Math.round(r.left + window.scrollX), y: Math.round(r.top + window.scrollY),
+      width: Math.round(r.width), height: Math.round(r.height),
+      kinds: window.CL.app.lastPack.layers.map((l) => l.kind)
+    };
+  })()`);
+  if (pairShot) {
+    const shotPair = await cdp.send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      clip: { x: pairShot.x, y: pairShot.y, width: pairShot.width, height: pairShot.height, scale: 1 }
+    });
+    const outPair = OUT_PNG.replace('.png', '-pair.png');
+    fs.writeFileSync(outPair, Buffer.from(shotPair.data, 'base64'));
+    console.log('  对扣特写：' + outPair + '（层姿态 ' + (pairShot.kinds || []).join(',') + '）');
   }
 
   // 汇总
