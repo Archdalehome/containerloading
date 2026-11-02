@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>集装箱装柜计算器 · 纸箱算柜 + 装柜图</title>
+<meta name="description" content="输入纸箱尺寸与数量，选集装箱规格，算出能装多少、怎么排，并生成可旋转的 3D 装柜图。纯前端，无需上传数据。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M6 12l10-4 10 4v9l-10 5-10-5z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+          <path d="M3 9 16 3l13 6v14l-13 6L3 23V9Z"></path>
+          <path d="M3 9l13 6 13-6M16 15v14"></path>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>集装箱装柜计算器</h1>
+        <p>纸箱装箱 · 装载率 · 3D 装柜图</p>
+      </div>
+    </div>
+    <div class="unit-badge">单位：毫米 / 千克</div>
+  </header>
+
+  <!-- 1. 集装箱规格 -->
+  <section class="card" id="container-card">
+    <div class="card-head">
+      <h2><span class="step">1</span>集装箱规格</h2>
+      <span class="hint">内置参数可改；箱高超过门高就进不去柜门</span>
+    </div>
+
+    <div class="preset-row" id="preset-row" role="tablist" aria-label="集装箱规格"></div>
+
+    <div class="spec-grid">
+      <label class="field">
+        <span class="field-label">内长 L</span>
+        <span class="input-wrap"><input type="number" id="spec-innerL" step="1" min="1" inputmode="decimal"><i>mm</i></span>
+      </label>
+      <label class="field">
+        <span class="field-label">内宽 W</span>
+        <span class="input-wrap"><input type="number" id="spec-innerW" step="1" min="1" inputmode="decimal"><i>mm</i></span>
+      </label>
+      <label class="field">
+        <span class="field-label">内高 H</span>
+        <span class="input-wrap"><input type="number" id="spec-innerH" step="1" min="1" inputmode="decimal"><i>mm</i></span>
+      </label>
+      <label class="field">
+        <span class="field-label">门高</span>
+        <span class="input-wrap"><input type="number" id="spec-doorH" step="1" min="1" inputmode="decimal"><i>mm</i></span>
+      </label>
+      <label class="field">
+        <span class="field-label">最大载重</span>
+        <span class="input-wrap"><input type="number" id="spec-payload" step="1" min="1" inputmode="decimal"><i>kg</i></span>
+      </label>
+    </div>
+    <div class="spec-foot">
+      <span class="spec-note" id="spec-note"></span>
+      <button type="button" class="btn ghost small" id="reset-container">恢复该规格默认值</button>
+    </div>
+  </section>
+
+  <!-- 2. 纸箱清单 -->
+  <section class="card" id="sku-card">
+    <div class="card-head">
+      <h2><span class="step">2</span>纸箱清单</h2>
+      <button type="button" class="btn primary small" id="add-sku">+ 添加箱型</button>
+    </div>
+    <div class="sku-list" id="sku-list"></div>
+    <div class="empty" id="sku-empty" hidden>还没有箱型，点右上角「+ 添加箱型」开始。</div>
+  </section>
+
+  <!-- 口径说明（红线，必须一直可见） -->
+  <div class="callout">
+    <div class="callout-title">排布口径（第一版）</div>
+    <p>
+      L 形箱与斜顶箱的<b>净体积</b>按真实几何计算；但<b>排布</b>时一律按<b>外接长方体</b>占位（保守估算）。
+      3D 图中会按真实几何显示箱体。形状咬合、翻转嵌套排布属于第二版，本版不做。
+    </p>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="btn calc" id="calc-btn">校验并汇总</button>
+    <span class="actions-hint">排布算法（M2）尚未接入，本页只做参数校验与体积汇总。</span>
+  </div>
+
+  <!-- 结果 -->
+  <section class="card hidden" id="result-card">
+    <div class="card-head">
+      <h2><span class="step">3</span><span id="result-title">校验结果</span></h2>
+      <span class="hint" id="result-hint"></span>
+    </div>
+    <div id="result-body"></div>
+  </section>
+
+  <footer class="foot">
+    <span>装柜计算器 · M1 骨架</span>
+    <span>内部计算一律毫米；显示时换算为米 / 立方米。</span>
+  </footer>
+</div>
+
+<script src="js/core/shapes.js"></script>
+<script src="js/core/containers.js"></script>
+<script src="js/core/validate.js"></script>
+<script src="js/core/storage.js"></script>
+<script src="js/ui/container-panel.js"></script>
+<script src="js/ui/sku-rows.js"></script>
+<script src="js/ui/result.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
