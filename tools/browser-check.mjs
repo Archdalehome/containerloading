@@ -270,6 +270,12 @@ function pageTestScript() {
   step('体积装载率 79.2%', bigText.includes('79.2%'), bigText.slice(0, 160));
   step('用高 2400 mm', bigText.includes('用高 2400'));
 
+  await wait(500);
+  const rcNormal = renderCheck(window.CL.app.lastPack, 'normal');
+  step('渲染 AABB 与占位矩形一致（正放 1680 箱）', rcNormal.maxErr < 1, '误差 ' + rcNormal.maxErr.toFixed(2) + ' mm');
+  step('渲染箱体两两不相交（正放）', rcNormal.overlaps === 0, '重叠 ' + rcNormal.overlaps);
+  step('描边与箱体包围盒一致（正放）', rcNormal.edgeErr < 3, '偏差 ' + rcNormal.edgeErr.toFixed(2) + ' mm');
+
   // 9. 3D 图
   await wait(400);
   const gl = $('#viewer-canvas canvas');
@@ -344,6 +350,12 @@ function pageTestScript() {
   step('对扣上件姿态是底面朝上', !!upper && upper.pose[8] === -1, upper ? upper.pose.join(',') : '无上件');
 
   await wait(500);
+  const rcPair = renderCheck(pairPack, 'pair');
+  step('渲染 AABB 与占位矩形一致（对扣 / 倒放件）', rcPair.maxErr < 1, '误差 ' + rcPair.maxErr.toFixed(2) + ' mm');
+  step('渲染箱体两两不相交（对扣 / 倒放件）', rcPair.overlaps === 0, '重叠 ' + rcPair.overlaps);
+  step('描边与箱体包围盒一致（对扣 / 倒放件）', rcPair.edgeErr < 3, '偏差 ' + rcPair.edgeErr.toFixed(2) + ' mm');
+
+  await wait(500);
   const geoCheck = (() => {
     const meshes = window.CL3D._state.meshes.filter((m) => m.userData.layer === 1);
     let flatTop = null;
@@ -393,6 +405,30 @@ function pageTestScript() {
   step('3D 画出垫块', window.CL3D._state.dunnageMeshes.length > 0 &&
     window.CL3D._state.dunnageMeshes[0].count > 0,
     window.CL3D._state.dunnageMeshes.length);
+
+  await wait(300);
+  const rcDun = renderCheck(dnPack, 'dunnage');
+  step('渲染 AABB 与占位矩形一致（L 形 + 垫块）', rcDun.maxErr < 1, '误差 ' + rcDun.maxErr.toFixed(2) + ' mm');
+  step('渲染箱体两两不相交（L 形 + 垫块）', rcDun.overlaps === 0, '重叠 ' + rcDun.overlaps);
+
+  // 侧放姿态：100×100×2000 开可侧放
+  click($('.shape-tab[data-shape="rect"]', cards()[0]));
+  await wait(100);
+  setField(0, 'L', '100');
+  setField(0, 'W', '100');
+  setField(0, 'H', '2000');
+  setVal($('.qty-input', cards()[0]), '2000');
+  const sideBox = $('.opt-side', cards()[0]);
+  if (sideBox) {
+    sideBox.checked = true;
+    sideBox.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  await calc();
+  await wait(400);
+  const rcSide = renderCheck(window.CL.app.lastPack, 'side');
+  step('渲染 AABB 与占位矩形一致（侧放）', rcSide.maxErr < 1, '误差 ' + rcSide.maxErr.toFixed(2) + ' mm');
+  step('渲染箱体两两不相交（侧放）', rcSide.overlaps === 0, '重叠 ' + rcSide.overlaps);
+  step('描边与箱体包围盒一致（侧放）', rcSide.edgeErr < 3, '偏差 ' + rcSide.edgeErr.toFixed(2) + ' mm');
 
   const chips = $$('.plan-chip');
   step('结果页列出全部方案', chips.length === 48, '方案条 ' + chips.length);
