@@ -85,7 +85,10 @@
 
   <div class="actions">
     <button type="button" class="btn calc" id="calc-btn">计算装柜</button>
-    <span class="actions-hint">按外接长方体分层排布；L形箱 / 斜顶箱的 3D 几何按真实形状渲染（M3）。</span>
+    <label class="toggle calc-toggle" title="层内余缝用其他箱型补满；开启后箱数只会不变或变多">
+      <input type="checkbox" id="allow-fill"> 允许跨 SKU 填缝
+    </label>
+    <span class="actions-hint">每个箱型的「可倒放 / 可侧放」在清单里勾选；两个都不勾时按正放计算。</span>
   </div>
 
   <!-- 结果 -->

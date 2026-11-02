@@ -171,14 +171,44 @@ function edgeTemplateFor(item) {
   ], sv.l);
 }
 
-/** 同一组（同 SKU、同层、同朝向）的箱子边合并进一个 BufferGeometry */
-function makeEdges(item, list, sx, sy, sz, rot, L, W) {
+/** 姿态矩阵：容器轴（x长 y宽 z高）→ three 轴（X长 Y高 Z宽）的共轭变换 */
+function poseMatrix3(m) {
+  // C: 容器 → three 是交换 y/z；R3 = C·M·C
+  var p = [0, 2, 1];
+  var out = new Array(9);
+  for (var i = 0; i < 3; i++) {
+    for (var j = 0; j < 3; j++) out[i * 3 + j] = m[p[i] * 3 + p[j]];
+  }
+  return out;
+}
+
+function matrix4FromR3(r) {
+  var out = new THREE.Matrix4();
+  out.set(
+    r[0], r[1], r[2], 0,
+    r[3], r[4], r[5], 0,
+    r[6], r[7], r[8], 0,
+    0, 0, 0, 1
+  );
+  return out;
+}
+
+/** 同一组（同 SKU、同层、同姿态）的箱子边合并进一个 BufferGeometry */
+function makeEdges(item, list, sx, sy, sz, pose, L, W) {
   const tmpl = edgeTemplateFor(item);
+  const r3 = poseMatrix3(pose);
   const coords = new Float32Array(tmpl.length);
   for (let k = 0; k < tmpl.length; k += 3) {
-    coords[k] = tmpl[k] * sx * EDGE_LIFT;
-    coords[k + 1] = tmpl[k + 1] * sy * EDGE_LIFT;
-    coords[k + 2] = tmpl[k + 2] * sz * EDGE_LIFT;
+    const x0 = tmpl[k] * sx * EDGE_LIFT;
+    const y0 = tmpl[k + 1] * sy * EDGE_LIFT;
+    const z0 = tmpl[k + 2] * sz * EDGE_LIFT;
+    // 局部 (x,y,z) 先转成 three 坐标 (x,z,y)，再乘姿态矩阵
+    const vx = x0;
+    const vy = z0;
+    const vz = y0;
+    coords[k] = r3[0] * vx + r3[1] * vy + r3[2] * vz;
+    coords[k + 1] = r3[3] * vx + r3[4] * vy + r3[5] * vz;
+    coords[k + 2] = r3[6] * vx + r3[7] * vy + r3[8] * vz;
   }
   const positions = new Float32Array(list.length * coords.length);
   list.forEach((p, i) => {
@@ -187,17 +217,9 @@ function makeEdges(item, list, sx, sy, sz, rot, L, W) {
     const cz = p.y + p.w / 2 - W / 2;
     const base = i * coords.length;
     for (let k = 0; k < coords.length; k += 3) {
-      let x = coords[k];
-      let z = coords[k + 2];
-      const y = coords[k + 1];
-      if (rot === 90) {
-        const nx = z;
-        z = -x;
-        x = nx;
-      }
-      positions[base + k] = x + cx;
-      positions[base + k + 1] = y + cy;
-      positions[base + k + 2] = z + cz;
+      positions[base + k] = coords[k] + cx;
+      positions[base + k + 1] = coords[k + 1] + cy;
+      positions[base + k + 2] = coords[k + 2] + cz;
     }
   });
   const geo = new THREE.BufferGeometry();
@@ -407,7 +429,7 @@ function buildInstanced(pack) {
   const byKey = new Map();
 
   pack.placements.forEach((p) => {
-    const key = p.skuId + '|' + p.layer;
+    const key = p.skuId + '|' + p.layer + '|' + (p.pose ? p.pose.join(',') : '');
     if (!byKey.has(key)) byKey.set(key, []);
     byKey.get(key).push(p);
   });
@@ -425,11 +447,12 @@ function buildInstanced(pack) {
     const sy = sv.h > gap * 2 ? (sv.h - gap) / sv.h : 0.9;
     const sz = sv.w > gap * 2 ? (sv.w - gap) / sv.w : 0.9;
 
-    const cacheKey = item.id + '|' + (list[0].rot === 90 ? 'r' : 'n');
+    const pose = list[0].pose || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    const cacheKey = item.id + '|' + pose.join(',');
     let geo = geomCache.get(cacheKey);
     if (!geo) {
       geo = geometryFor(item);
-      if (list[0].rot === 90) geo.rotateY(Math.PI / 2);
+      geo.applyMatrix4(matrix4FromR3(poseMatrix3(pose)));
       geomCache.set(cacheKey, geo);
     }
 
@@ -450,7 +473,7 @@ function buildInstanced(pack) {
     S.meshes.push(mesh);
 
     // 描边合并：一箱一个 LineSegments 会有上千 draw call，这里按组只提交一个
-    const lines = makeEdges(item, list, sx, sy, sz, list[0].rot, L, W);
+    const lines = makeEdges(item, list, sx, sy, sz, pose, L, W);
     S.root.add(lines);
     S.lines.push(lines);
   });

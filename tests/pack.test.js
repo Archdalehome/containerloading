@@ -33,8 +33,8 @@ function row(id, values, qty, weight, shape, name) {
   return { id, shape: shape || 'rect', name: name || '', values, qty: String(qty), weight: weight === undefined ? '' : String(weight) };
 }
 
-function state(container, rows) {
-  return { container, rows };
+function state(container, rows, allowFill) {
+  return { container, rows, options: { allowFill: !!allowFill } };
 }
 
 function assertInBounds(pack, c, label) {
@@ -50,13 +50,42 @@ function assertInBounds(pack, c, label) {
 
 function assertNoOverlap(pack, label) {
   const ps = pack.placements;
+  // 对扣的一对：外接体在高度上必然交叠，但真实形状互补不重叠，单独用几何断言校验
+  const isPairMate = (a, b) => a.layer === b.layer && a.x === b.x && a.y === b.y &&
+    ((a.kind === 'pair-lower' && b.kind === 'pair-upper') ||
+     (a.kind === 'pair-upper' && b.kind === 'pair-lower'));
   for (let i = 0; i < ps.length; i++) {
     for (let j = i + 1; j < ps.length; j++) {
+      if (isPairMate(ps[i], ps[j])) continue;
       if (P.overlaps(ps[i], ps[j])) {
         throw new Error((label || '') + ' 堆叠重叠: ' + JSON.stringify(ps[i]) + ' × ' + JSON.stringify(ps[j]));
       }
     }
   }
+}
+
+/** 每箱下方必须有支撑（对扣上件由下件支撑） */
+function assertSupported(pack, label) {
+  const byTop = {};
+  pack.placements.forEach((p) => {
+    const k = Math.round((p.z + p.h) * 1000);
+    (byTop[k] = byTop[k] || []).push({ x: p.x, y: p.y, l: p.l, w: p.w });
+  });
+  const lowerKey = {};
+  pack.placements.forEach((p) => {
+    if (p.kind === 'pair-lower') lowerKey[p.layer + '|' + p.x + '|' + p.y] = p;
+  });
+  pack.placements.forEach((p) => {
+    if (p.z <= 1e-6) return;
+    if (p.kind === 'pair-upper') {
+      const low = lowerKey[p.layer + '|' + p.x + '|' + p.y];
+      if (!low) throw new Error((label || '') + ' 对扣上件找不到下件');
+      return;
+    }
+    const rects = byTop[Math.round(p.z * 1000)];
+    const ok = rects && P.covers({ x: p.x, y: p.y, l: p.l, w: p.w }, rects);
+    if (!ok) throw new Error((label || '') + ' 悬空箱: ' + JSON.stringify(p));
+  });
 }
 
 // ---------- 硬基准 ----------
@@ -208,14 +237,16 @@ test('200 组随机 SKU 全部满足几何与载重约束', () => {
       } else {
         values = { L: String(L), W: String(W), H: String(H) };
       }
-      rows.push({ id: 'r' + k, shape, name: 'S' + k, values, qty: String(qty), weight });
+      rows.push({ id: 'r' + k, shape, name: 'S' + k, values, qty: String(qty), weight,
+        allowFlip: rand() < 0.5, allowSide: rand() < 0.5 });
     }
 
-    const r = P.run(state(container, rows));
+    const r = P.run(state(container, rows, rand() < 0.5));
     const tag = ' 第 ' + (n + 1) + ' 组（' + preset.key + '，' + skuCount + ' SKU）';
 
     assertInBounds(r, r.container, tag);
     assertNoOverlap(r, tag);
+    assertSupported(r, tag);
 
     const sumLayers = r.layers.reduce((s, l) => s + l.count, 0);
     assert.strictEqual(sumLayers, r.placements.length, tag + ' 分层箱数与明细不一致');
@@ -265,6 +296,85 @@ test('斜顶箱按外接长方体占位（留空 = 保守），体积按净体�
   assert.strictEqual(r.placements[0].h, 500, '占位高度应取外接高 500');
   assert.ok(Math.abs(r.totals.netVolume - 96e6) < 1, '净体积应为 0.096 m³');
   assert.ok(r.totals.spaceUsage > r.totals.fillRate, '空间占用率应高于净装载率');
+});
+
+// ---------- v2 姿态与对扣 ----------
+console.log('\nv2 姿态、对扣、填缝');
+
+function slopeRow(qty, extra) {
+  return Object.assign(row('s', { L: '600', W: '400', Hlow: '300', Hhigh: '500' }, qty, '', 'slope'), extra || {});
+}
+
+test('默认关：斜顶 500 箱、装载率 62.9%（与 v1 一致）', () => {
+  const r = P.run(state(C.get('40HQ'), [slopeRow(1000)]));
+  assert.strictEqual(r.totals.loadedCount, 500);
+  assert.strictEqual(r.layers.length, 5);
+  assert.ok(Math.abs(r.totals.fillRate - 0.629) < 0.001);
+});
+
+test('可倒放：斜顶对扣 500 → 600 箱，3 个对扣层，每层 800mm', () => {
+  const r = P.run(state(C.get('40HQ'), [slopeRow(1000, { allowFlip: true })]));
+  assert.strictEqual(r.totals.loadedCount, 600);
+  assert.strictEqual(r.layers.length, 3);
+  r.layers.forEach((L) => {
+    assert.strictEqual(L.kind, 'pair');
+    assert.strictEqual(L.height, 800);
+    assert.strictEqual(L.count, 200, '每层 100 对 = 200 箱');
+  });
+  assert.strictEqual(r.usedHeight, 2400);
+});
+
+test('对扣上件确实倒放（底面朝上）且贴在下件上', () => {
+  const r = P.run(state(C.get('40HQ'), [slopeRow(1000, { allowFlip: true })]));
+  const lower = r.placements.filter((p) => p.kind === 'pair-lower');
+  const upper = r.placements.filter((p) => p.kind === 'pair-upper');
+  assert.strictEqual(lower.length, 300);
+  assert.strictEqual(upper.length, 300);
+  for (let i = 0; i < Math.min(20, upper.length); i++) {
+    const u = upper[i];
+    assert.strictEqual(u.pose[8], -1, '倒放件局部 z 轴应朝下');
+    const l = lower.find((p) => p.layer === u.layer && p.x === u.x && p.y === u.y);
+    assert.ok(l, '找不到对应下件');
+    assert.strictEqual(u.z, l.z + 300, '上件底面应落在下件的 H低 高度');
+  }
+});
+
+test('可侧放：100×100×2000 从 2760 提升到 3588（+30%）', () => {
+  const defaultR = P.run(state(C.get('40HQ'), [row('t', { L: '100', W: '100', H: '2000' }, 5000)]));
+  assert.strictEqual(defaultR.totals.loadedCount, 2760);
+  const sideRow = row('t', { L: '100', W: '100', H: '2000' }, 5000);
+  sideRow.allowSide = true;
+  const sideR = P.run(state(C.get('40HQ'), [sideRow]));
+  assert.strictEqual(sideR.totals.loadedCount, 3588);
+  assert.ok(sideR.layers.some((L) => L.kind === 'side'));
+});
+
+test('填缝：1680 满高后还能塞进 200×200×300 小箱，且箱数只增不减', () => {
+  const rows = [
+    row('a', { L: '400', W: '300', H: '300' }, 1680),
+    row('b', { L: '200', W: '200', H: '300' }, 300)
+  ];
+  const without = P.run(state(C.get('40HQ'), rows, false));
+  const withFill = P.run(state(C.get('40HQ'), rows, true));
+  assert.strictEqual(without.totals.loadedCount, 1680, '不填缝时小箱进不去');
+  assert.strictEqual(withFill.totals.loadedCount, 1980, '填缝后 +300');
+  assert.ok(withFill.totals.loadedCount >= without.totals.loadedCount, '非劣');
+  assertInBounds(withFill, withFill.container);
+  assertNoOverlap(withFill, '填缝');
+  assertSupported(withFill, '填缝');
+});
+
+test('填缝不会挤掉更大的箱型（非劣性）', () => {
+  const rows = [
+    row('a', { L: '400', W: '300', H: '300' }, 600),
+    row('b', { L: '200', W: '200', H: '250' }, 2000)
+  ];
+  const without = P.run(state(C.get('40HQ'), rows, false));
+  const withFill = P.run(state(C.get('40HQ'), rows, true));
+  assert.ok(withFill.totals.loadedCount >= without.totals.loadedCount,
+    '填缝后反而变少：' + without.totals.loadedCount + ' → ' + withFill.totals.loadedCount);
+  assertNoOverlap(withFill, '填缝非劣');
+  assertSupported(withFill, '填缝非劣');
 });
 
 // ---------- 补柜估算 ----------

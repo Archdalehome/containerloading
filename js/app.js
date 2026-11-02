@@ -14,6 +14,7 @@
   var state = {
     container: C.get(C.defaultKey),
     rows: [],
+    options: { allowFill: false },
     showErrors: false
   };
   var seq = 1;
@@ -48,7 +49,9 @@
       name: raw && raw.name ? String(raw.name) : '',
       values: values,
       qty: raw && raw.qty !== undefined && raw.qty !== null && raw.qty !== '' ? String(raw.qty) : '1',
-      weight: raw && raw.weight !== undefined && raw.weight !== null ? String(raw.weight) : ''
+      weight: raw && raw.weight !== undefined && raw.weight !== null ? String(raw.weight) : '',
+      allowFlip: !!(raw && raw.allowFlip),
+      allowSide: !!(raw && raw.allowSide)
     };
   }
 
@@ -63,10 +66,21 @@
     var saved = ST.load();
     if (saved) {
       state.container = Object.assign(C.get(saved.container.key || C.defaultKey), saved.container);
+      state.options = Object.assign({ allowFill: false }, saved.options || {});
       state.rows = saved.rows.map(normalizeRow);
       if (!state.rows.length) state.rows = defaultState();
     } else {
       state.rows = defaultState();
+    }
+
+    var fillToggle = document.getElementById('allow-fill');
+    if (fillToggle) {
+      fillToggle.checked = !!state.options.allowFill;
+      fillToggle.addEventListener('change', function (e) {
+        state.options.allowFill = e.target.checked;
+        ST.save(state);
+        CL.ui.result.markStale();
+      });
     }
 
     var rowsUI = CL.ui.skuRows.mount(state, {

@@ -99,10 +99,29 @@
       html += '</ul>';
       if (extra) {
         if (extra.count > 0) {
-          html += '<p class="extra-line">按同规格 <b>' + esc(extra.containerKey) + '</b> 估算：剩余货物还需 <b>' +
-            extra.count + ' 个柜</b>' +
+          html += '<div class="extra-box"><p class="extra-line">按同规格 <b>' + esc(extra.containerKey) +
+            '</b> 估算：剩余货物还需 <b>' + extra.count + ' 个柜</b>' +
             (extra.truncated ? '（已超过 50 个，仅估算到此）' : '') +
-            '。' + (extra.rounds.length ? '各柜装载：' + extra.rounds.map(function (r) { return r.loaded + ' 箱'; }).join(' / ') : '') + '</p>';
+            '。分柜策略是「装满即走，剩下再开一柜」，不按箱数平均分摊。</p>';
+          html += '<div class="table-wrap"><table class="tbl mini"><thead><tr>' +
+            '<th>柜序</th><th>箱数</th><th>净体积 (m³)</th><th>体积装载率</th><th>重量 (kg)</th></tr></thead><tbody>';
+          html += '<tr><td>本柜</td><td class="num mono">' + t.loadedCount.toLocaleString('zh-CN') + '</td>' +
+            '<td class="num mono">' + m3(t.netVolume) + '</td><td class="num mono">' + pct(t.fillRate) + '</td>' +
+            '<td class="num mono">' + (t.weightKnown ? kg(t.weight) : '—') + '</td></tr>';
+          extra.rounds.forEach(function (r, i) {
+            var rate = r.fillRate;
+            html += '<tr><td>第 ' + (i + 2) + ' 柜</td><td class="num mono">' + r.loaded.toLocaleString('zh-CN') + '</td>' +
+              '<td class="num mono">' + m3(r.netVolume) + '</td>' +
+              '<td class="num mono' + (rate < 0.2 ? ' low-fill' : '') + '">' + pct(rate) + '</td>' +
+              '<td class="num mono">' + (r.weightKnown ? kg(r.weight) : '—') + '</td></tr>';
+          });
+          html += '</tbody></table></div>';
+          var last = extra.rounds[extra.rounds.length - 1];
+          if (last && last.fillRate < 0.2) {
+            html += '<p class="extra-line">注意：最后第 ' + (extra.rounds.length + 1) + ' 个柜只装了 ' +
+              last.loaded + ' 箱（' + pct(last.fillRate) + '），可以考虑并柜或调整订单。</p>';
+          }
+          html += '</div>';
         }
         if (extra.impossibleCount > 0) {
           html += '<p class="extra-line">另有 <b>' + extra.impossibleCount + ' 箱</b>（' +
@@ -143,11 +162,17 @@
     // 分层
     html += '<h3 class="block-title">分层明细 <span class="muted">（自下而上，层号 1 在最底层）</span></h3>' +
       '<div class="table-wrap tall"><table class="tbl"><thead><tr>' +
-      '<th>层</th><th>箱型</th><th>名称</th><th>本层箱数</th><th>单层容量</th><th>层高 (mm)</th><th>层顶高度 (mm)</th><th>朝向</th>' +
+      '<th>层</th><th>箱型</th><th>名称</th><th>本层箱数</th><th>单层容量</th><th>层高 (mm)</th><th>层顶高度 (mm)</th><th>姿态</th><th>本层填缝</th>' +
       '</tr></thead><tbody>';
     pack.layers.forEach(function (L) {
       var item = null;
       pack.items.forEach(function (it) { if (it.id === L.skuId) item = it; });
+      var poseLabel = L.kind === 'pair' ? '对扣（一正一倒）'
+        : L.kind === 'side' ? '侧放'
+          : L.kind === 'flip' ? '倒放' : '正放';
+      var fillText = (L.fill && L.fill.length)
+        ? L.fill.map(function (f) { return (f.name || '填缝箱') + ' ' + f.count + ' 箱'; }).join('、')
+        : '—';
       html += '<tr>' +
         '<td class="num">' + (L.index + 1) + '</td>' +
         '<td>' + esc(L.shapeName) + '</td>' +
@@ -156,7 +181,8 @@
         '<td class="num mono">' + L.capacity + '</td>' +
         '<td class="num mono">' + S.num(L.height) + '</td>' +
         '<td class="num mono">' + S.num(L.top) + '</td>' +
-        '<td>' + (L.rot === 90 ? '旋转 90°' : '不旋转') + '</td>' +
+        '<td>' + poseLabel + '</td>' +
+        '<td class="note-cell">' + esc(fillText) + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';

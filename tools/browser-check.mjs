@@ -90,6 +90,8 @@ function pageTestScript() {
 
   await wait(120);
 
+  try {
+
   // 1. 默认状态：40HQ + 一行矩形箱
   const c = cards();
   step('默认一行矩形箱', c.length === 1, '行数=' + c.length);
@@ -222,9 +224,69 @@ function pageTestScript() {
   setVal($('.qty-input', cards()[0]), '1680');
   await calc();
 
-  // 10. 校验 localStorage 持久化
+  // 10. 姿态开关：斜顶开「可倒放」后出现对扣层，且 3D 里上件真翻转
+  step('切换前仍是 1 行', cards().length === 1, '行数=' + cards().length);
+  const slopeTab = $('.shape-tab[data-shape="slope"]', cards()[0]);
+  step('斜顶标签存在', !!slopeTab);
+  if (slopeTab) {
+    click(slopeTab);
+    await wait(100);
+  }
+  step('切斜顶后字段齐全', !!$('.v-input[data-key="Hhigh"]', cards()[0]));
+  setField(0, 'L', '600');
+  setField(0, 'W', '400');
+  setField(0, 'Hlow', '300');
+  setField(0, 'Hhigh', '500');
+  setVal($('.qty-input', cards()[0]), '600');
+  await calc();
+  step('斜顶默认是正放层', window.CL.app.lastPack.layers[0].kind === 'normal', window.CL.app.lastPack.layers[0].kind);
+
+  const flipBox = $('.opt-flip', cards()[0]);
+  step('可倒放开关存在', !!flipBox);
+  if (flipBox) {
+    flipBox.checked = true;
+    flipBox.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  await wait(80);
+  await calc();
+  const pairPack = window.CL.app.lastPack;
+  step('勾可倒放后出现对扣层', pairPack.layers[0].kind === 'pair', pairPack.layers[0].kind);
+  const upper = pairPack.placements.find((p) => p.kind === 'pair-upper');
+  step('对扣上件姿态是底面朝上', !!upper && upper.pose[8] === -1, upper ? upper.pose.join(',') : '无上件');
+
+  await wait(500);
+  const geoCheck = (() => {
+    const meshes = window.CL3D._state.meshes.filter((m) => m.userData.layer === 1);
+    let flatTop = null;
+    let slopedTop = null;
+    meshes.forEach((m) => {
+      const pos = m.geometry.attributes.position;
+      let maxL = -1e9;
+      let maxR = -1e9;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        if (x < -50) maxL = Math.max(maxL, y);
+        if (x > 50) maxR = Math.max(maxR, y);
+      }
+      if (Math.abs(maxL - maxR) < 5) flatTop = { maxL, maxR };
+      else slopedTop = { maxL, maxR };
+    });
+    return { flatTop, slopedTop };
+  })();
+  step('3D 里倒放件顶面是平的（真翻转，不是摆样子）', !!geoCheck.flatTop, JSON.stringify(geoCheck));
+  step('3D 里正放件顶面是斜的', !!geoCheck.slopedTop, JSON.stringify(geoCheck));
+
+  const fillToggle = $('#allow-fill');
+  step('填缝开关存在且默认关', !!fillToggle && !fillToggle.checked);
+
+  // 11. 校验 localStorage 持久化
   const saved = localStorage.getItem('containerloading.v1');
   step('输入已本地保存', !!saved && JSON.parse(saved).rows.length === 1);
+
+  } catch (e) {
+    step('脚本执行中断：' + (e && e.message), false, String((e && e.stack) || '').slice(0, 300));
+  }
 
   return out;
 })()`;
@@ -340,7 +402,12 @@ try {
     const setVal = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
     while ($$('.sku-card').length > 1) { click($$('.sku-card')[$$('.sku-card').length - 1].querySelector('[data-act="delete"]')); await wait(30); }
     const cardById = (id) => document.querySelector('.sku-card[data-id="' + id + '"]');
-    const c0 = $$('.sku-card')[0];
+    let c0 = $$('.sku-card')[0];
+    const id0 = c0.dataset.id;
+    // 前面的姿态测试把第一行改成了斜顶，这里先切回矩形
+    click(c0.querySelector('.shape-tab[data-shape="rect"]'));
+    await wait(60);
+    c0 = cardById(id0);
     setVal(c0.querySelector('.v-input[data-key="L"]'), '400');
     setVal(c0.querySelector('.v-input[data-key="W"]'), '300');
     setVal(c0.querySelector('.v-input[data-key="H"]'), '300');

@@ -655,6 +655,31 @@ input[type=number]::-webkit-inner-spin-button { margin-left: 2px; }
 }
 .extra-line b { color: #7a4406; }
 
+.extra-box { margin-top: 10px; }
+.extra-box .extra-line:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+.tbl.mini { font-size: 12.5px; min-width: 520px; }
+.tbl.mini th, .tbl.mini td { padding: 6px 10px; }
+.low-fill { color: var(--err); font-weight: 600; }
+
+/* ---------- 姿态开关 ---------- */
+.pose-toggles {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 9px;
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+.calc-toggle { font-size: 13px; color: var(--ink2); }
+
 /* ---------- 页脚 ---------- */
 .foot {
   display: flex;

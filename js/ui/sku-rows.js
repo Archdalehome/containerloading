@@ -71,6 +71,10 @@
           '<span class="field-label">单箱重（kg）</span>' +
           '<span class="input-wrap"><input type="number" class="weight-input" step="0.01" min="0" inputmode="decimal" placeholder="可选" value="' + esc(row.weight) + '"></span>' +
         '</label>' +
+        '<div class="pose-toggles">' +
+          '<label class="toggle"><input type="checkbox" class="opt-flip"' + (row.allowFlip ? ' checked' : '') + '> 可倒放</label>' +
+          '<label class="toggle"><input type="checkbox" class="opt-side"' + (row.allowSide ? ' checked' : '') + '> 可侧放</label>' +
+        '</div>' +
         '<div class="row-meta"></div>' +
       '</div>' +
       '<div class="row-errors" aria-live="polite"></div>';
@@ -110,6 +114,16 @@
       row.weight = e.target.value;
       refreshMeta(el, row, state);
       if (state.showErrors) paint(el, row, state);
+      hooks.onChange();
+    });
+
+    el.querySelector('.opt-flip').addEventListener('change', function (e) {
+      row.allowFlip = e.target.checked;
+      hooks.onChange();
+    });
+
+    el.querySelector('.opt-side').addEventListener('change', function (e) {
+      row.allowSide = e.target.checked;
       hooks.onChange();
     });
 
