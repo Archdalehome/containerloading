@@ -92,7 +92,10 @@
   <section class="card hidden" id="result-card">
     <div class="card-head">
       <h2><span class="step">3</span><span id="result-title">校验结果</span></h2>
-      <span class="hint" id="result-hint"></span>
+      <div class="result-head-right">
+        <span class="hint" id="result-hint"></span>
+        <button type="button" class="btn small" id="export-btn" hidden>导出装柜清单 CSV</button>
+      </div>
     </div>
     <div id="result-body"></div>
   </section>
@@ -116,8 +119,48 @@
     </div>
   </section>
 
+  <!-- 使用说明 -->
+  <section class="card" id="help-card">
+    <div class="card-head">
+      <h2>使用说明</h2>
+      <span class="hint">先说清口径，免得把保守估算当成最优解</span>
+    </div>
+    <div class="help-grid">
+      <div class="help-item">
+        <h3>怎么用</h3>
+        <p>选集装箱规格（内置 20GP / 40GP / 40HQ / 45HQ，参数可改）→ 加纸箱行，选形状、填尺寸与数量 → 点「计算装柜」。
+          单箱重量可以不填，但不填就只能算体积，载重和「是否超重」算不了。</p>
+      </div>
+      <div class="help-item">
+        <h3>非矩形箱按外接长方体排布</h3>
+        <p>L 形箱、斜顶箱的净体积按真实几何计算，但排布时一律用它的外接长方体占位（保守估算），
+          3D 图里才按真实形状显示。真实形状和外接体之间空出来的地方，就是保守留空——这一版不做形状咬合。</p>
+      </div>
+      <div class="help-item">
+        <h3>箱子比门高就进不去</h3>
+        <p>箱体必须先过柜门。40HQ 内高 2698mm、门高只有 2585mm，2600mm 的箱子里头放得下也进不了门，
+          程序按门高拦截并写明具体数值。内高和门高都可以在规格里改。</p>
+      </div>
+      <div class="help-item">
+        <h3>结果怎么读</h3>
+        <p>体积装载率 = 已装箱净体积 ÷ 柜内容积；分层明细一层一个箱型，层高累加不超过内高；
+          装不完时会给出剩余箱数、原因，以及同规格柜还需要几个。</p>
+      </div>
+      <div class="help-item">
+        <h3>3D 图里那点缝隙</h3>
+        <p>每箱渲染时缩了 4mm 以便看清是哪一箱，<b>只是视觉效果，不代表真实余量</b>；
+          排布位置仍按外接长方体紧贴计算。箱体描边是一个整体几何，不会拖慢交互。</p>
+      </div>
+      <div class="help-item">
+        <h3>导出清单</h3>
+        <p>结果页可以导出 CSV（Excel 直接打开，UTF-8 BOM）：基本信息、分层小计、逐箱明细，
+          明细里带层号、列号、排号与朝向，可直接给装柜工人对照。</p>
+      </div>
+    </div>
+  </section>
+
   <footer class="foot">
-    <span>装柜计算器 · M3 3D 装柜图</span>
+    <span>装柜计算器 · M4 导出与补柜</span>
     <span>内部计算一律毫米；显示时换算为米 / 立方米。</span>
   </footer>
 </div>
@@ -126,10 +169,12 @@
 <script src="js/core/containers.js"></script>
 <script src="js/core/validate.js"></script>
 <script src="js/core/pack.js"></script>
+<script src="js/core/report.js"></script>
 <script src="js/core/storage.js"></script>
 <script src="js/ui/container-panel.js"></script>
 <script src="js/ui/sku-rows.js"></script>
 <script src="js/ui/result.js"></script>
+<script src="js/ui/export-csv.js"></script>
 <script src="js/app.js"></script>
 <script type="module" src="js/ui/viewer.js"></script>
 </body>

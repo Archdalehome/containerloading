@@ -60,7 +60,9 @@
   function renderPack(res, pack, state) {
     var t = pack.totals;
     var c = pack.container;
+    var extra = pack.extra || null;
     var allLoaded = t.remainingCount === 0;
+    var totalContainers = 1 + (extra ? extra.count : 0);
 
     var html = '<div class="metrics">' +
       '<div class="metric"><span class="metric-label">体积装载率</span>' +
@@ -78,9 +80,14 @@
       '<div class="metric"><span class="metric-label">层数 / 用高</span>' +
         '<span class="metric-value">' + t.layerCount + ' <small>层</small></span>' +
         '<span class="metric-sub">用高 ' + S.num(pack.usedHeight) + ' / ' + S.num(c.innerH) + ' mm（' + pct(t.heightUsage) + '）</span></div>' +
+      '<div class="metric' + (allLoaded ? ' ok' : '') + '"><span class="metric-label">所需柜数</span>' +
+        '<span class="metric-value">' + totalContainers + ' <small>个 ' + esc(c.key) + '</small></span>' +
+        '<span class="metric-sub">' + (allLoaded
+          ? '全部装进本柜'
+          : '本柜装 ' + t.loadedCount.toLocaleString('zh-CN') + ' 箱，剩余需 ' + (extra ? extra.count : '?') + ' 个') + '</span></div>' +
       '</div>';
 
-    // 未装完的必须说清原因
+    // 未装完的必须说清原因，并给出补柜数量
     if (!allLoaded) {
       html += '<div class="warn-box"><p class="warn-title">未装完：' + t.remainingCount + ' 箱（' +
         m3(pack.items.reduce(function (s, it) { return s + it.remaining * it.netVolumeEach; }, 0)) + ' m³）</p><ul>';
@@ -89,7 +96,20 @@
         html += '<li><b>' + esc(nameOf(it)) + '</b>（' + it.shapeName + '）剩 ' + it.remaining + ' 箱 — ' +
           esc(it.reason ? it.reason.message : '未能装入') + '</li>';
       });
-      html += '</ul></div>';
+      html += '</ul>';
+      if (extra) {
+        if (extra.count > 0) {
+          html += '<p class="extra-line">按同规格 <b>' + esc(extra.containerKey) + '</b> 估算：剩余货物还需 <b>' +
+            extra.count + ' 个柜</b>' +
+            (extra.truncated ? '（已超过 50 个，仅估算到此）' : '') +
+            '。' + (extra.rounds.length ? '各柜装载：' + extra.rounds.map(function (r) { return r.loaded + ' 箱'; }).join(' / ') : '') + '</p>';
+        }
+        if (extra.impossibleCount > 0) {
+          html += '<p class="extra-line">另有 <b>' + extra.impossibleCount + ' 箱</b>（' +
+            extra.impossibleNames.map(esc).join('、') + '）超过门高或底面超尺寸，换同规格柜也装不进，需要改箱型或换柜型。</p>';
+        }
+      }
+      html += '</div>';
     }
 
     if (t.overloaded) {
@@ -154,6 +174,8 @@
     var title = document.getElementById('result-title');
     var hint = document.getElementById('result-hint');
     var body = document.getElementById('result-body');
+    var exportBtn = document.getElementById('export-btn');
+    if (exportBtn) exportBtn.hidden = !res.ok;
 
     card.classList.remove('hidden', 'is-error', 'is-ok', 'is-partial');
     if (!res.ok) {

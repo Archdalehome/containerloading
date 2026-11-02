@@ -267,5 +267,64 @@ test('斜顶箱按外接长方体占位（留空 = 保守），体积按净体�
   assert.ok(r.totals.spaceUsage > r.totals.fillRate, '空间占用率应高于净装载率');
 });
 
+// ---------- 补柜估算 ----------
+console.log('\n剩余货物需要几个柜');
+
+test('2000 箱 400×300×300：本柜 1680，剩 320 还需 1 个柜', () => {
+  const c = C.get('40HQ');
+  const st = state(c, [row('a', { L: '400', W: '300', H: '300' }, 2000)]);
+  const r = P.run(st);
+  assert.strictEqual(r.totals.remainingCount, 320);
+  const ex = P.extraContainers(st, r);
+  assert.strictEqual(ex.count, 1);
+  assert.strictEqual(ex.leftOver, 0);
+  assert.strictEqual(ex.rounds.length, 1);
+});
+
+test('5000 箱：还需 2 个柜（1680 + 1640），合计 3 个', () => {
+  const c = C.get('40HQ');
+  const st = state(c, [row('a', { L: '400', W: '300', H: '300' }, 5000)]);
+  const r = P.run(st);
+  assert.strictEqual(r.totals.loadedCount, 1680);
+  const ex = P.extraContainers(st, r);
+  assert.strictEqual(ex.count, 2, '还需 ' + ex.count + ' 个');
+  assert.deepStrictEqual(ex.rounds.map((x) => x.loaded), [1680, 1640]);
+  assert.strictEqual(ex.leftOver, 0);
+});
+
+test('超门高的箱子不参与补柜，单独报告', () => {
+  const c = C.get('40HQ');
+  const st = state(c, [
+    row('a', { L: '400', W: '300', H: '300' }, 2000, 5),
+    row('t', { L: '500', W: '500', H: '2600' }, 5, 5)
+  ]);
+  const r = P.run(st);
+  const ex = P.extraContainers(st, r);
+  assert.strictEqual(ex.count, 1, '补柜数 ' + ex.count);
+  assert.strictEqual(ex.impossibleCount, 5);
+  assert.strictEqual(ex.impossible.length, 1);
+  assert.ok(ex.impossible[0].reason.message.includes('门高'));
+});
+
+test('全部装得下时不需要补柜', () => {
+  const c = C.get('40HQ');
+  const st = state(c, [row('a', { L: '400', W: '300', H: '300' }, 100)]);
+  const r = P.run(st);
+  const ex = P.extraContainers(st, r);
+  assert.strictEqual(ex.count, 0);
+  assert.strictEqual(ex.leftOver, 0);
+});
+
+test('补柜计算受载重限制：大量重箱按重量分柜', () => {
+  const c = C.get('40HQ');
+  const st = state(c, [row('a', { L: '400', W: '300', H: '300' }, 4000, 20)]);
+  const r = P.run(st);
+  const ex = P.extraContainers(st, r);
+  // 每柜 26500/20 = 1325 箱，4000 = 1325 × 3 + 25
+  assert.strictEqual(r.totals.loadedCount, 1325);
+  assert.strictEqual(ex.count, 3, '还需 ' + ex.count + ' 个柜');
+  assert.strictEqual(ex.leftOver, 0);
+});
+
 console.log('\n' + passed + ' 通过，' + failures.length + ' 失败\n');
 if (failures.length) process.exit(1);

@@ -82,6 +82,7 @@
         shapeName: shape.name,
         name: (row.name || '').trim(),
         bbox: bb,
+        rawValues: Object.assign({}, v),
         // 真实几何参数，供 3D 按形状渲染（不是外接长方体）
         shapeValues: shape.key === 'lshape'
           ? { l: S.toNum(v.L), w: S.toNum(v.W), h: bb.h, wlow: S.toNum(v.Wlow), whigh: S.toNum(v.Whigh), hlow: S.toNum(v.Hlow), hhigh: S.toNum(v.Hhigh) }
@@ -209,6 +210,8 @@
           placements.push({
             skuId: cand.id,
             index: items.indexOf(cand),
+            col: col + 1,
+            row: row + 1,
             x: col * o.l,
             y: row * o.w,
             z: z,
@@ -332,8 +335,76 @@
     };
   }
 
+  /**
+   * 剩余货物还需要几个同规格柜：把剩余量当成新的一票货，重跑同一算法，
+   * 装多少减多少，直到装完 / 装不动（理论上不该发生）。
+   * 物理上装不进的（超门高、底面超尺寸）不参与计算，单独报告——换柜也装不进。
+   */
+  function extraContainers(state, first) {
+    var c = parseContainer(state.container || {});
+    var pending = (first.items || []).filter(function (it) {
+      return it.placeable && it.remaining > 0;
+    }).map(function (it) {
+      return { it: it, qty: it.remaining };
+    });
+
+    var impossible = (first.items || []).filter(function (it) {
+      return !it.placeable && it.remaining > 0;
+    });
+
+    var count = 0;
+    var rounds = [];
+    var guard = 0;
+
+    while (pending.some(function (r) { return r.qty > 0; }) && guard < 50) {
+      guard++;
+      var rows = pending.filter(function (r) { return r.qty > 0; }).map(function (r) {
+        var it = r.it;
+        return {
+          id: it.id,
+          shape: it.shape,
+          name: it.name,
+          values: it.rawValues || {},
+          qty: String(r.qty),
+          weight: it.unitWeight === null ? '' : String(it.unitWeight)
+        };
+      });
+      var res = run({ container: state.container || {}, rows: rows });
+      if (res.totals.loadedCount === 0) break;
+
+      count++;
+      rounds.push({
+        loaded: res.totals.loadedCount,
+        fillRate: res.totals.fillRate
+      });
+      var byId = {};
+      res.items.forEach(function (it) { byId[it.id] = it.loaded; });
+      pending.forEach(function (r) {
+        r.qty -= (byId[r.it.id] || 0);
+        if (r.qty < 0) r.qty = 0;
+      });
+    }
+
+    var left = pending.reduce(function (s, r) { return s + r.qty; }, 0);
+    var impossibleCount = impossible.reduce(function (s, it) { return s + it.remaining; }, 0);
+
+    return {
+      count: count,
+      rounds: rounds,
+      leftOver: left,
+      truncated: guard >= 50,
+      impossible: impossible,
+      impossibleCount: impossibleCount,
+      impossibleNames: impossible.map(function (it) {
+        return it.name || (it.shapeName + ' #' + (it.index + 1));
+      }),
+      containerKey: c.key
+    };
+  }
+
   NS.pack = {
     run: run,
+    extraContainers: extraContainers,
     bestOrientation: bestOrientation,
     MAX_BOXES: MAX_BOXES,
     /** 自检用：两箱是否在三维上相交（单位 mm） */

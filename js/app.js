@@ -154,6 +154,14 @@
       });
     }
 
+    // 导出按钮在结果区里，用事件委托，避免每次重渲染后重新绑定
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest || !t.closest('#export-btn')) return;
+      if (!CL.app.lastPack) return;
+      CL.exportCsv.save(CL.app.lastPack, state, CL.app.lastPack.extra || null);
+    });
+
     document.getElementById('calc-btn').addEventListener('click', function () {
       state.showErrors = true;
       panel.paintErrors();
@@ -161,6 +169,12 @@
 
       var res = V.all(state);
       var pack = res.ok ? CL.pack.run(state) : null;
+      if (pack) {
+        pack.extra = pack.totals.remainingCount > 0 ? CL.pack.extraContainers(state, pack) : null;
+        CL.app.lastPack = pack;
+      } else {
+        CL.app.lastPack = null;
+      }
       CL.ui.result.render(res, pack, state);
 
       if (pack) showViewer(pack);
@@ -176,6 +190,7 @@
   // 暴露给自检脚本（tools/browser-check.mjs）使用，不影响正常 UI
   CL.app = {
     state: state,
+    lastPack: null,
     validate: function () { return V.all(state); },
     addRow: function () {
       state.rows.push(newRow('rect'));

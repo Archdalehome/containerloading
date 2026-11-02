@@ -207,11 +207,20 @@ function pageTestScript() {
   const dims = $$('#viewer-canvas .dim-label').map((d) => d.textContent).join('|');
   step('尺寸标注齐全', dims.includes('12032') && dims.includes('2352') && dims.includes('2698') && dims.includes('柜门'), dims);
 
-  // 10. 装不完时要说清原因
+  // 9. 装不完时要说清原因 + 补柜数量
   setVal($('.qty-input', cards()[0]), '2000');
   await calc();
   step('装不完显示部分装载', $('#result-card').classList.contains('is-partial'), $('#result-title').textContent);
   step('剩余原因写剩余高度', $('#result-body').textContent.includes('剩余高度'));
+  step('给出补柜数量', $('#result-body').textContent.includes('还需 1 个柜'), $('#result-body').textContent.slice(0, 200));
+  step('所需柜数 2 个 40HQ', $('#result-body').textContent.includes('2 个 40HQ'));
+
+  const csv = window.CL.report.buildCsv(window.CL.app.lastPack, window.CL.app.state, { extra: window.CL.app.lastPack.extra });
+  step('导出 CSV 含分层小计与逐箱明细', csv.includes('分层小计') && csv.includes('逐箱明细') && csv.includes('列号') && csv.split('\\r\\n').length > 200, '长度 ' + csv.length);
+  step('导出按钮可见', !$('#export-btn').hidden);
+  click($('#export-btn'));
+  await wait(100);
+
   setVal($('.qty-input', cards()[0]), '1680');
   await calc();
 

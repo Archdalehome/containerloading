@@ -622,6 +622,39 @@ input[type=number]::-webkit-inner-spin-button { margin-left: 2px; }
   line-height: 1.6;
 }
 
+/* ---------- 使用说明 ---------- */
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px 22px;
+}
+.help-item h3 {
+  font-size: 13px;
+  margin-bottom: 4px;
+  color: var(--ink);
+}
+.help-item p {
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.7;
+}
+.help-item b { color: var(--ink); }
+
+.result-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.extra-line {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #e6d3ae;
+  color: var(--warn);
+}
+.extra-line b { color: #7a4406; }
+
 /* ---------- 页脚 ---------- */
 .foot {
   display: flex;
