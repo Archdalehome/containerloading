@@ -80,8 +80,11 @@ def main():
 
     checks = [
         ("/js/core/pack.js", b"MAX_BOXES", "M2 排布算法文件"),
+        ("/js/ui/viewer.js", b"CL3D", "M3 3D 模块"),
+        ("/vendor/three.module.min.js", b"THREE", "three.js 本地文件"),
         ("/", "计算装柜".encode(), "首页按钮"),
-        ("/", b"js/core/pack.js", "首页引用 pack.js"),
+        ("/", b"js/ui/viewer.js", "首页引用 3D 模块"),
+        ("/", b'id="viewer-canvas"', "首页有 3D 容器"),
     ]
 
     deadline = time.time() + 180

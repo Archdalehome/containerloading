@@ -253,6 +253,11 @@ try {
 
   await cdp.send('Page.navigate', { url: BASE });
   await sleep(1200);
+  const firstLoad = await cdp.evaluate('({ href: location.href, title: document.title, dom: !!document.getElementById("add-sku") })');
+  if (!firstLoad || !firstLoad.dom) {
+    console.log('页面没加载出来：' + JSON.stringify(firstLoad));
+    throw new Error('页面加载失败，检查地址或网络');
+  }
   await cdp.evaluate('localStorage.clear(); true');
   await cdp.send('Page.reload', { ignoreCache: true });
   await sleep(1200);
