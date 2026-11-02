@@ -542,7 +542,7 @@ function pageTestScript() {
 }
 
 const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-edge-'));
-const child = spawn(EDGE, [
+const edgeArgs = [
   '--headless=new',
   '--no-sandbox',
   '--disable-gpu',
@@ -554,7 +554,10 @@ const child = spawn(EDGE, [
   '--user-data-dir=' + userDir,
   '--window-size=' + WIDTH + ',1600',
   'about:blank'
-], { stdio: 'ignore' });
+];
+// 验线上时走本地代理：EDGE_PROXY=socks5://127.0.0.1:10808 node tools/browser-check.mjs https://...
+if (process.env.EDGE_PROXY) edgeArgs.unshift('--proxy-server=' + process.env.EDGE_PROXY);
+const child = spawn(EDGE, edgeArgs, { stdio: 'ignore' });
 
 let exitCode = 0;
 let cdp = null;
