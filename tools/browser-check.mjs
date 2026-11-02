@@ -131,14 +131,19 @@ function pageTestScript() {
   step('错误信息含差值 50', errText.includes('差 50'), errText.slice(0, 120));
   step('错误行标红', !!$('.v-input.invalid', card(1)));
 
-  // 4. 改成一致 → 通过
+  // 4. 改成一致 → 出装柜结果
   setField(1, 'W', '400');
   await calc();
   step('修正后校验通过', $('#result-card').classList.contains('is-ok'), $('#result-title').textContent);
-  step('汇总表两行数据', $$('#result-body .tbl tbody tr').length === 2);
-  step('汇总含净体积合计', $('#result-body').textContent.includes('净体积合计'));
-  const firstRow = $('#result-body .tbl tbody tr');
-  step('第1行 100 箱净体积 3.600 m³', firstRow.children[6].textContent.trim() === '3.600', firstRow.children[6].textContent);
+  const skuTable = $$('#result-body .tbl')[0];
+  step('SKU 表两行数据', $$('tbody tr', skuTable).length === 2, '行数=' + $$('tbody tr', skuTable).length);
+  step('出现体积装载率', $('#result-body').textContent.includes('体积装载率'));
+  step('已装箱 120 箱', $('#result-body').textContent.includes('120 / 120 箱'), $('#result-body .metric-value').textContent);
+  const firstSkuRow = $$('tbody tr', skuTable)[0];
+  step('矩形箱 100 箱净体积 3.600 m³', firstSkuRow.children[7].textContent.trim() === '3.600', firstSkuRow.children[7].textContent);
+  const secondSkuRow = $$('tbody tr', skuTable)[1];
+  step('L形箱 20 箱全部装入', secondSkuRow.children[5].textContent.trim() === '20' && secondSkuRow.children[6].textContent.trim() === '0');
+  step('分层明细有数据', $$('#result-body .tbl')[1] && $$('tbody tr', $$('#result-body .tbl')[1]).length >= 2);
 
   // 5. 门高约束：箱高 2600 > 40HQ 门高 2585
   setField(1, 'Hhigh', '2600');
@@ -160,16 +165,33 @@ function pageTestScript() {
   step('数量 0 被拦下', $('#result-card').classList.contains('is-error') && $('#result-body').textContent.includes('整数'));
   setVal($('.qty-input', card(1)), '20');
 
-  // 8. 改回 40HQ，恢复正常数据，截屏
+  // 8. 回到 40HQ，跑硬基准：1680 箱
   click($('.preset[data-key="40HQ"]'));
   await wait(50);
   setField(1, 'Hhigh', '500');
+  click($('[data-act="delete"]', card(1)));
+  await wait(50);
+  setVal($('.qty-input', cards()[0]), '1680');
+  setVal($('.weight-input', cards()[0]), '');
   await calc();
-  step('恢复后通过', $('#result-card').classList.contains('is-ok'));
+  const bigText = $('#result-body').textContent;
+  step('UI 算出 1680 箱', bigText.includes('1,680 / 1,680 箱') && $('#result-card').classList.contains('is-ok'), $('#result-title').textContent);
+  const layerTable = $$('#result-body .tbl')[1];
+  step('分层明细 8 层', layerTable && $$('tbody tr', layerTable).length === 8, layerTable ? $$('tbody tr', layerTable).length : 'no table');
+  step('体积装载率 79.2%', bigText.includes('79.2%'), bigText.slice(0, 160));
+  step('用高 2400 mm', bigText.includes('用高 2400'));
 
-  // 8. 校验 localStorage 持久化
+  // 9. 装不完时要说清原因
+  setVal($('.qty-input', cards()[0]), '2000');
+  await calc();
+  step('装不完显示部分装载', $('#result-card').classList.contains('is-partial'), $('#result-title').textContent);
+  step('剩余原因写剩余高度', $('#result-body').textContent.includes('剩余高度'));
+  setVal($('.qty-input', cards()[0]), '1680');
+  await calc();
+
+  // 10. 校验 localStorage 持久化
   const saved = localStorage.getItem('containerloading.v1');
-  step('输入已本地保存', !!saved && JSON.parse(saved).rows.length === 2);
+  step('输入已本地保存', !!saved && JSON.parse(saved).rows.length === 1);
 
   return out;
 })()`;

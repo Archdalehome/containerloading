@@ -1,6 +1,6 @@
 /*
- * 结果面板：校验错误清单 / 参数汇总指标。
- * M2 会在这里接装载率、分层明细；本版只汇总输入。
+ * 结果面板：校验错误清单 / 装柜指标 / 每 SKU 装载情况 / 分层明细。
+ * 装柜数据来自 js/core/pack.js。
  */
 (function (root) {
   'use strict';
@@ -16,9 +16,17 @@
     return (Math.round(n * 10) / 10).toLocaleString('zh-CN');
   }
 
+  function pct(x) {
+    return (Math.round(x * 1000) / 10).toFixed(1) + '%';
+  }
+
   function esc(s) {
     return String(s === null || s === undefined ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function nameOf(item) {
+    return item.name ? item.name : '（未命名）';
   }
 
   function renderErrors(res, state) {
@@ -49,70 +57,117 @@
     return html;
   }
 
-  function renderOk(res) {
-    var t = res.totals;
-    var hasWeight = t.hasAllWeight;
-    var weightValue = hasWeight ? kg(t.weight) : '—';
-    var weightSub = hasWeight ? 'kg（按单箱重 × 数量）' : '有箱型未填单箱重，无法判断超载';
+  function renderPack(res, pack, state) {
+    var t = pack.totals;
+    var c = pack.container;
+    var allLoaded = t.remainingCount === 0;
 
     var html = '<div class="metrics">' +
-      '<div class="metric"><span class="metric-label">箱型 / 总箱数</span>' +
-        '<span class="metric-value">' + t.skuCount + ' 种 / ' + t.qty.toLocaleString('zh-CN') + ' 箱</span></div>' +
-      '<div class="metric"><span class="metric-label">净体积合计</span>' +
-        '<span class="metric-value">' + m3(t.netVolume) + ' <small>m³</small></span>' +
-        '<span class="metric-sub">外接体积 ' + m3(t.outerVolume) + ' m³（排布口径）</span></div>' +
-      '<div class="metric"><span class="metric-label">总重量</span>' +
-        '<span class="metric-value">' + weightValue + (hasWeight ? ' <small>kg</small>' : '') + '</span>' +
-        '<span class="metric-sub">' + weightSub + '</span></div>' +
-      '<div class="metric ok"><span class="metric-label">参数校验</span>' +
-        '<span class="metric-value">通过</span>' +
-        '<span class="metric-sub">可以进入排布计算</span></div>' +
+      '<div class="metric"><span class="metric-label">体积装载率</span>' +
+        '<span class="metric-value">' + pct(t.fillRate) + '</span>' +
+        '<span class="metric-sub">净体积 ' + m3(t.netVolume) + ' / 柜内 ' + m3(pack.containerVolume) + ' m³</span></div>' +
+      '<div class="metric"><span class="metric-label">已装箱数</span>' +
+        '<span class="metric-value">' + t.loadedCount.toLocaleString('zh-CN') + ' <small>/ ' + t.requestedCount.toLocaleString('zh-CN') + ' 箱</small></span>' +
+        '<span class="metric-sub">' + (allLoaded ? '全部装完' : '剩余 ' + t.remainingCount.toLocaleString('zh-CN') + ' 箱未装') + '</span></div>' +
+      '<div class="metric"><span class="metric-label">总重 / 载重上限</span>' +
+        '<span class="metric-value">' + (t.weightKnown ? kg(t.weight) : '—') +
+          (t.weightKnown ? ' <small>/ ' + kg(t.payload) + ' kg</small>' : '') + '</span>' +
+        '<span class="metric-sub">' + (t.weightKnown
+          ? '载重利用率 ' + pct(t.payload > 0 ? t.weight / t.payload : 0) + (t.overloaded ? ' · 货物总重超载' : ' · 未超载')
+          : '有箱型未填单箱重，载重未校验') + '</span></div>' +
+      '<div class="metric"><span class="metric-label">层数 / 用高</span>' +
+        '<span class="metric-value">' + t.layerCount + ' <small>层</small></span>' +
+        '<span class="metric-sub">用高 ' + S.num(pack.usedHeight) + ' / ' + S.num(c.innerH) + ' mm（' + pct(t.heightUsage) + '）</span></div>' +
       '</div>';
 
-    html += '<div class="table-wrap"><table class="tbl"><thead><tr>' +
-      '<th>#</th><th>箱型</th><th>名称</th><th>外接尺寸 (mm)</th><th>净体积/箱 (m³)</th>' +
-      '<th>数量</th><th>净体积合计 (m³)</th><th>重量 (kg)</th>' +
-      '</tr></thead><tbody>';
+    // 未装完的必须说清原因
+    if (!allLoaded) {
+      html += '<div class="warn-box"><p class="warn-title">未装完：' + t.remainingCount + ' 箱（' +
+        m3(pack.items.reduce(function (s, it) { return s + it.remaining * it.netVolumeEach; }, 0)) + ' m³）</p><ul>';
+      pack.items.forEach(function (it) {
+        if (it.remaining <= 0) return;
+        html += '<li><b>' + esc(nameOf(it)) + '</b>（' + it.shapeName + '）剩 ' + it.remaining + ' 箱 — ' +
+          esc(it.reason ? it.reason.message : '未能装入') + '</li>';
+      });
+      html += '</ul></div>';
+    }
 
-    res.rows.forEach(function (r, i) {
-      var s = r.summary;
+    if (t.overloaded) {
+      html += '<div class="warn-box"><p>货物总重 ' + kg(t.requestedWeight) + ' kg 超过 ' +
+        kg(t.payload) + ' kg 上限，已按载重截断。</p></div>';
+    }
+
+    // 每 SKU
+    html += '<h3 class="block-title">每个箱型的装载结果</h3>' +
+      '<div class="table-wrap"><table class="tbl"><thead><tr>' +
+      '<th>#</th><th>箱型</th><th>名称</th><th>外接尺寸 (mm)</th><th>需求</th><th>已装</th><th>剩余</th><th>净体积 (m³)</th><th>说明</th>' +
+      '</tr></thead><tbody>';
+    pack.items.forEach(function (it, i) {
+      var note = it.remaining > 0
+        ? '<span class="bad">' + esc(it.reason ? it.reason.message : '未装入') + '</span>'
+        : '<span class="good">已全部装入</span>';
       html += '<tr>' +
         '<td class="num">' + (i + 1) + '</td>' +
-        '<td>' + esc(s.shapeName) + '</td>' +
-        '<td>' + (r.name ? esc(r.name) : '<span class="muted">—</span>') + '</td>' +
-        '<td class="mono">' + S.num(s.bbox.l) + ' × ' + S.num(s.bbox.w) + ' × ' + S.num(s.bbox.h) + '</td>' +
-        '<td class="num mono">' + m3(s.netVolume) + '</td>' +
-        '<td class="num mono">' + s.qty.toLocaleString('zh-CN') + '</td>' +
-        '<td class="num mono">' + m3(s.netTotal) + '</td>' +
-        '<td class="num mono">' + (s.totalWeight === null ? '<span class="muted">—</span>' : kg(s.totalWeight)) + '</td>' +
+        '<td>' + esc(it.shapeName) + '</td>' +
+        '<td>' + esc(nameOf(it)) + '</td>' +
+        '<td class="mono">' + S.num(it.bbox.l) + ' × ' + S.num(it.bbox.w) + ' × ' + S.num(it.bbox.h) + '</td>' +
+        '<td class="num mono">' + it.qty.toLocaleString('zh-CN') + '</td>' +
+        '<td class="num mono"><b>' + it.loaded.toLocaleString('zh-CN') + '</b></td>' +
+        '<td class="num mono">' + (it.remaining > 0 ? '<span class="bad">' + it.remaining + '</span>' : '0') + '</td>' +
+        '<td class="num mono">' + m3(it.loaded * it.netVolumeEach) + '</td>' +
+        '<td class="note-cell">' + note + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';
 
-    var warns = [];
-    if (!res.totals.hasAllWeight) warns.push('有箱型没填单箱重量，M2 无法判断是否超载。');
-    if (warns.length) {
-      html += '<div class="warn-box">' + warns.map(function (w) { return '<p>' + esc(w) + '</p>'; }).join('') + '</div>';
-    }
+    // 分层
+    html += '<h3 class="block-title">分层明细 <span class="muted">（自下而上，层号 1 在最底层）</span></h3>' +
+      '<div class="table-wrap tall"><table class="tbl"><thead><tr>' +
+      '<th>层</th><th>箱型</th><th>名称</th><th>本层箱数</th><th>单层容量</th><th>层高 (mm)</th><th>层顶高度 (mm)</th><th>朝向</th>' +
+      '</tr></thead><tbody>';
+    pack.layers.forEach(function (L) {
+      html += '<tr>' +
+        '<td class="num">' + (L.index + 1) + '</td>' +
+        '<td>' + esc(L.shapeName) + '</td>' +
+        '<td>' + esc(L.skuName ? L.skuName : '（未命名）') + '</td>' +
+        '<td class="num mono">' + L.count + '</td>' +
+        '<td class="num mono">' + L.capacity + '</td>' +
+        '<td class="num mono">' + S.num(L.height) + '</td>' +
+        '<td class="num mono">' + S.num(L.top) + '</td>' +
+        '<td>' + (L.rot === 90 ? '旋转 90°' : '不旋转') + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
 
-    html += '<div class="next-note">M1 阶段只做参数校验与体积汇总。分层排布、体积装载率、分层明细在 M2 接入；3D 装柜图在 M3 接入。</div>';
+    html += '<div class="next-note">' +
+      '停止原因：' + esc(pack.stop.message) + '。' +
+      '排布按外接长方体占位；L形箱/斜顶箱的 3D 几何按真实形状渲染（M3）。' +
+      (pack.truncated ? ' 本次结果已截断。' : '') +
+      '</div>';
     return html;
   }
 
-  function render(res, state) {
+  function render(res, pack, state) {
     var card = document.getElementById('result-card');
     var title = document.getElementById('result-title');
     var hint = document.getElementById('result-hint');
     var body = document.getElementById('result-body');
 
-    card.classList.remove('hidden', 'is-error', 'is-ok');
-    card.classList.add(res.ok ? 'is-ok' : 'is-error');
-    title.textContent = res.ok ? '参数校验通过' : '校验未通过';
-    hint.textContent = res.ok
-      ? '可以进入排布计算'
-      : '共 ' + res.errorCount + ' 处需要修改，已在清单中标红';
+    card.classList.remove('hidden', 'is-error', 'is-ok', 'is-partial');
+    if (!res.ok) {
+      card.classList.add('is-error');
+      title.textContent = '校验未通过';
+      hint.textContent = '共 ' + res.errorCount + ' 处需要修改，已在清单中标红';
+      body.innerHTML = renderErrors(res, state);
+      return;
+    }
 
-    body.innerHTML = res.ok ? renderOk(res) : renderErrors(res, state);
+    card.classList.add(pack.totals.remainingCount === 0 ? 'is-ok' : 'is-partial');
+    title.textContent = pack.totals.remainingCount === 0 ? '装载方案' : '部分装载';
+    hint.textContent = pack.totals.remainingCount === 0
+      ? '全部 ' + pack.totals.loadedCount.toLocaleString('zh-CN') + ' 箱已装入'
+      : '还有 ' + pack.totals.remainingCount.toLocaleString('zh-CN') + ' 箱装不下';
+    body.innerHTML = renderPack(res, pack, state);
   }
 
   function markStale() {

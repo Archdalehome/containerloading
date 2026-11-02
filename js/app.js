@@ -125,7 +125,8 @@
       rowsUI.paintErrors();
 
       var res = V.all(state);
-      CL.ui.result.render(res, state);
+      var pack = res.ok ? CL.pack.run(state) : null;
+      CL.ui.result.render(res, pack, state);
 
       var card = document.getElementById('result-card');
       card.scrollIntoView({ behavior: 'smooth', block: 'start' });
