@@ -55,7 +55,7 @@ test('基本信息齐全', () => {
 test('分层小计：行数等于层数，含层高与层顶', () => {
   const start = lines.findIndex((l) => l.startsWith('分层小计'));
   const header = lines[start + 1];
-  assert.ok(header.includes('层号') && header.includes('层高(mm)') && header.includes('朝向'), header);
+  assert.ok(header.includes('层号') && header.includes('层高(mm)') && header.includes('姿态'), header);
   const layerLines = [];
   for (let i = start + 2; i < lines.length; i++) {
     if (!lines[i]) break;
@@ -70,7 +70,7 @@ test('逐箱明细行数 = 已装箱数，列数一致', () => {
   const detailHeader = lines[start + 1];
   const cols = detailHeader.split(',').length;
   assert.strictEqual(cols, 16, '明细列数 ' + cols);
-  assert.ok(detailHeader.includes('层号') && detailHeader.includes('列号') && detailHeader.includes('排号') && detailHeader.includes('朝向'));
+  assert.ok(detailHeader.includes('层号') && detailHeader.includes('列号') && detailHeader.includes('排号') && detailHeader.includes('姿态'));
   let n = 0;
   for (let i = start + 2; i < lines.length; i++) {
     if (!lines[i]) continue;
@@ -80,13 +80,16 @@ test('逐箱明细行数 = 已装箱数，列数一致', () => {
   assert.strictEqual(n, pack.totals.loadedCount, '明细行数 ' + n);
 });
 
-test('明细里朝向只有两种写法', () => {
+test('明细里姿态写明清放/倒放/侧放', () => {
   const start = lines.findIndex((l) => l.startsWith('逐箱明细'));
+  const seen = new Set();
   for (let i = start + 2; i < lines.length; i++) {
     if (!lines[i]) continue;
     const v = lines[i].split(',')[6];
-    assert.ok(v === '不旋转' || v === '旋转90°', '朝向异常：' + v);
+    seen.add(v);
+    assert.ok(/正放|倒放|侧放|填缝/.test(v), '姿态异常：' + v);
   }
+  assert.ok(seen.size >= 1, '没有任何姿态');
 });
 
 test('名字里有逗号时会被引号包住', () => {

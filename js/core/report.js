@@ -45,8 +45,14 @@
       pad(d.getHours()) + pad(d.getMinutes());
   }
 
-  function orientation(p) {
-    return p.rot === 90 ? '旋转90°' : '不旋转';
+  function poseLabel(p) {
+    if (p.kind === 'pair-upper') return '倒放（对扣上件，翻转 180°）';
+    if (p.kind === 'pair-lower') return '正放（对扣下件）';
+    if (p.kind === 'fill') return '填缝（正放）';
+    if (p.kind === 'side') return '侧放';
+    if (p.kind === 'flip') return '倒放';
+    if (p.pose && p.pose[8] === -1) return '倒放';
+    return '正放';
   }
 
   /** 每层小计 */
@@ -111,14 +117,17 @@
     out.push('');
 
     out.push(line(['分层小计（自下而上）']));
-    out.push(line(['层号', '箱型', '名称', '箱数', '单层容量', '层高(mm)', '层底(mm)', '层顶(mm)', '朝向']));
+    out.push(line(['层号', '箱型', '名称', '箱数', '单层容量', '层高(mm)', '层底(mm)', '层顶(mm)', '姿态']));
     layerRows(pack).forEach(function (L) {
-      out.push(line([L.layer, L.shapeName, L.name, L.count, L.capacity, L.height, L.bottom, L.top, L.rot === 90 ? '旋转90°' : '不旋转']));
+      var pose = L.kind === 'pair' ? '对扣（一正一倒）'
+        : L.kind === 'side' ? '侧放'
+          : L.kind === 'flip' ? '倒放' : '正放';
+      out.push(line([L.layer, L.shapeName, L.name, L.count, L.capacity, L.height, L.bottom, L.top, pose]));
     });
     out.push('');
 
     out.push(line(['逐箱明细']));
-    out.push(line(['序号', '层号', '列号', '排号', '箱型', '名称', '朝向',
+    out.push(line(['序号', '层号', '列号', '排号', '箱型', '名称', '姿态',
       'X(mm)', 'Y(mm)', 'Z(mm)', '箱长(mm)', '箱宽(mm)', '箱高(mm)', '净体积(m³)', '单箱重(kg)', '合计重(kg)']));
 
     var itemById = {};
@@ -128,7 +137,7 @@
       var it = itemById[p.skuId] || {};
       out.push(line([
         i + 1, p.layer + 1, p.col, p.row,
-        it.shapeName || '', nameById[p.skuId] || '', orientation(p),
+        it.shapeName || '', nameById[p.skuId] || '', poseLabel(p),
         p.x, p.y, p.z, p.l, p.w, p.h,
         m3(it.netVolumeEach || 0),
         it.unitWeight === null || it.unitWeight === undefined ? '' : kg(it.unitWeight),
