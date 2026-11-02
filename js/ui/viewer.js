@@ -194,7 +194,9 @@ function matrix4FromR3(r) {
   return out;
 }
 
-/** 同一组（同 SKU、同层、同姿态）的箱子边合并进一个 BufferGeometry */
+/** 同一组（同 SKU、同层、同姿态）的箱子边合并进一个 BufferGeometry。
+ *  坐标链与箱体完全一致：模板本身就在 (x=长, y=高, z=宽) 的 three 局部系里，
+ *  直接乘 poseMatrix3（它已经做过 y/z 共轭），不要再交换一次。 */
 function makeEdges(item, list, sx, sy, sz, pose, L, W) {
   const tmpl = edgeTemplateFor(item);
   const r3 = poseMatrix3(pose);
@@ -203,13 +205,9 @@ function makeEdges(item, list, sx, sy, sz, pose, L, W) {
     const x0 = tmpl[k] * sx * EDGE_LIFT;
     const y0 = tmpl[k + 1] * sy * EDGE_LIFT;
     const z0 = tmpl[k + 2] * sz * EDGE_LIFT;
-    // 局部 (x,y,z) 先转成 three 坐标 (x,z,y)，再乘姿态矩阵
-    const vx = x0;
-    const vy = z0;
-    const vz = y0;
-    coords[k] = r3[0] * vx + r3[1] * vy + r3[2] * vz;
-    coords[k + 1] = r3[3] * vx + r3[4] * vy + r3[5] * vz;
-    coords[k + 2] = r3[6] * vx + r3[7] * vy + r3[8] * vz;
+    coords[k] = r3[0] * x0 + r3[1] * y0 + r3[2] * z0;
+    coords[k + 1] = r3[3] * x0 + r3[4] * y0 + r3[5] * z0;
+    coords[k + 2] = r3[6] * x0 + r3[7] * y0 + r3[8] * z0;
   }
   const positions = new Float32Array(list.length * coords.length);
   list.forEach((p, i) => {
@@ -692,6 +690,7 @@ window.CL3D = {
   setHighlight,
   setView,
   isReady: () => S.ready,
+  THREE, // 测试里要用它做渲染层 AABB 断言
   _state: S
 };
 

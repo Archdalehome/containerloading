@@ -88,6 +88,93 @@ function pageTestScript() {
   const card = (i) => cards()[i];
   const calc = async () => { click($('#calc-btn')); await wait(60); };
 
+  /** 渲染层自检：每个实例的 AABB 必须等于占位矩形（每边缩 4mm 视觉缝），且两两不相交；
+   *  描边几何的包围盒必须和箱体一致（防止两条变换链分叉）。 */
+  function renderCheck(pack, label) {
+    const st = window.CL3D._state;
+    const T = window.CL3D.THREE;
+    const c = pack.container;
+    const meshes = st.meshes;
+    const groups = [];
+    const map = new Map();
+    pack.placements.forEach((p) => {
+      const k = p.skuId + '|' + p.layer + '|' + (p.pose ? p.pose.join(',') : '');
+      if (!map.has(k)) { map.set(k, []); groups.push(k); }
+      map.get(k).push(p);
+    });
+    let maxErr = 0;
+    const boxes = [];
+    meshes.forEach((m, gi) => {
+      const list = map.get(groups[gi]);
+      if (!list) return;
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      const m4 = new T.Matrix4();
+      for (let i = 0; i < m.count; i++) {
+        m.getMatrixAt(i, m4);
+        const bb = m.geometry.boundingBox.clone().applyMatrix4(m4);
+        const p = list[i];
+        const cx = p.x + p.l / 2 - c.innerL / 2;
+        const cy = p.z + p.h / 2;
+        const cz = p.y + p.w / 2 - c.innerW / 2;
+        const err = Math.max(
+          Math.abs((bb.min.x + bb.max.x) / 2 - cx),
+          Math.abs((bb.min.y + bb.max.y) / 2 - cy),
+          Math.abs((bb.min.z + bb.max.z) / 2 - cz),
+          Math.abs((bb.max.x - bb.min.x) - (p.l - 4)),
+          Math.abs((bb.max.y - bb.min.y) - (p.h - 4)),
+          Math.abs((bb.max.z - bb.min.z) - (p.w - 4))
+        );
+        if (err > maxErr) maxErr = err;
+        boxes.push({ min: bb.min, max: bb.max, p });
+      }
+    });
+
+    let overlaps = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        if (a.p.layer === b.p.layer && (
+          (a.p.kind === 'pair-lower' && b.p.kind.indexOf('pair-upper') === 0) ||
+          (a.p.kind.indexOf('pair-upper') === 0 && b.p.kind === 'pair-lower') ||
+          a.p.kind === 'notch' || b.p.kind === 'notch')) continue;
+        const ox = Math.min(a.max.x, b.max.x) - Math.max(a.min.x, b.min.x);
+        const oy = Math.min(a.max.y, b.max.y) - Math.max(a.min.y, b.min.y);
+        const oz = Math.min(a.max.z, b.max.z) - Math.max(a.min.z, b.min.z);
+        if (ox > 1 && oy > 1 && oz > 1) overlaps++;
+      }
+    }
+
+    // 描边与箱体：按层比较包围盒（描边有 0.4% 外扩，给 3mm 容差）
+    let edgeErr = 0;
+    const byLayer = {};
+    boxes.forEach((b) => {
+      const k = b.p.layer;
+      byLayer[k] = byLayer[k] || { min: [1e9, 1e9, 1e9], max: [-1e9, -1e9, -1e9] };
+      byLayer[k].min[0] = Math.min(byLayer[k].min[0], b.min.x);
+      byLayer[k].min[1] = Math.min(byLayer[k].min[1], b.min.y);
+      byLayer[k].min[2] = Math.min(byLayer[k].min[2], b.min.z);
+      byLayer[k].max[0] = Math.max(byLayer[k].max[0], b.max.x);
+      byLayer[k].max[1] = Math.max(byLayer[k].max[1], b.max.y);
+      byLayer[k].max[2] = Math.max(byLayer[k].max[2], b.max.z);
+    });
+    st.lines.forEach((ln) => {
+      if (!ln.geometry.boundingBox) ln.geometry.computeBoundingBox();
+      const bb = ln.geometry.boundingBox;
+      const g = byLayer[ln.userData.layer - 1];
+      if (!g) return;
+      edgeErr = Math.max(edgeErr,
+        Math.abs((bb.min.x + bb.max.x) / 2 - (g.min[0] + g.max[0]) / 2),
+        Math.abs((bb.min.y + bb.max.y) / 2 - (g.min[1] + g.max[1]) / 2),
+        Math.abs((bb.min.z + bb.max.z) / 2 - (g.min[2] + g.max[2]) / 2),
+        Math.abs((bb.max.x - bb.min.x) - (g.max[0] - g.min[0])),
+        Math.abs((bb.max.y - bb.min.y) - (g.max[1] - g.min[1])),
+        Math.abs((bb.max.z - bb.min.z) - (g.max[2] - g.min[2]))
+      );
+    });
+    return { maxErr, overlaps, edgeErr, count: boxes.length, label: label || '' };
+  }
+
   await wait(120);
 
   try {
