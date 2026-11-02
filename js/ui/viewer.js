@@ -29,6 +29,7 @@ const S = {
   container: null,
   pack: null,
   meshes: [],
+  lines: [],
   dimLabels: {},
   cam: { theta: 0.62, phi: 1.05, radius: 10000, target: new THREE.Vector3() },
   dirty: true,
@@ -102,6 +103,112 @@ function geometryFor(item) {
   const sz = sv.w > gap * 2 ? (sv.w - gap) / sv.w : 0.9;
   geo.scale(sx, sy, sz);
   return geo;
+}
+
+/* ---------- 描边几何（按 SKU+层 合并成 LineSegments，不是每箱一次 draw call） ---------- */
+
+const EDGE_LIFT = 1.004; // 描边轻微外扩，避免和箱体表面 z-fighting
+
+/** 截面多边形（[z,y] 点列）沿 x 轴挤出成棱柱的棱 */
+function prismEdges(points, L) {
+  const out = [];
+  for (let s = 0; s < 2; s++) {
+    const x = s === 0 ? -L / 2 : L / 2;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const q = points[(i + 1) % points.length];
+      out.push(x, p[1], p[0], x, q[1], q[0]);
+    }
+  }
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    out.push(-L / 2, p[1], p[0], L / 2, p[1], p[0]);
+  }
+  return out;
+}
+
+function edgeTemplateFor(item) {
+  const sv = item.shapeValues || item.bbox;
+  if (item.shape === 'lshape') {
+    const H = sv.h;
+    const W = sv.w;
+    const zLow = -W / 2 + sv.wlow;
+    return prismEdges([
+      [-W / 2, -H / 2],
+      [W / 2, -H / 2],
+      [W / 2, H / 2],
+      [zLow, H / 2],
+      [zLow, sv.hlow - H / 2],
+      [-W / 2, sv.hlow - H / 2]
+    ], sv.l);
+  }
+  if (item.shape === 'slope') {
+    const L = sv.l;
+    const W = sv.w;
+    const H = sv.h;
+    const x0 = -L / 2;
+    const x1 = L / 2;
+    const z0 = -W / 2;
+    const z1 = W / 2;
+    const bottom = [[x0, -H / 2, z0], [x1, -H / 2, z0], [x1, -H / 2, z1], [x0, -H / 2, z1]];
+    const top = [[x0, sv.hlow - H / 2, z0], [x1, H / 2, z0], [x1, H / 2, z1], [x0, sv.hlow - H / 2, z1]];
+    const out = [];
+    const seg = (a, b) => out.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    for (let i = 0; i < 4; i++) {
+      seg(bottom[i], bottom[(i + 1) % 4]);
+      seg(top[i], top[(i + 1) % 4]);
+      seg(bottom[i], top[i]);
+    }
+    return out;
+  }
+  const H = sv.h;
+  const W = sv.w;
+  return prismEdges([
+    [-W / 2, -H / 2],
+    [W / 2, -H / 2],
+    [W / 2, H / 2],
+    [-W / 2, H / 2]
+  ], sv.l);
+}
+
+/** 同一组（同 SKU、同层、同朝向）的箱子边合并进一个 BufferGeometry */
+function makeEdges(item, list, sx, sy, sz, rot, L, W) {
+  const tmpl = edgeTemplateFor(item);
+  const coords = new Float32Array(tmpl.length);
+  for (let k = 0; k < tmpl.length; k += 3) {
+    coords[k] = tmpl[k] * sx * EDGE_LIFT;
+    coords[k + 1] = tmpl[k + 1] * sy * EDGE_LIFT;
+    coords[k + 2] = tmpl[k + 2] * sz * EDGE_LIFT;
+  }
+  const positions = new Float32Array(list.length * coords.length);
+  list.forEach((p, i) => {
+    const cx = p.x + p.l / 2 - L / 2;
+    const cy = p.z + p.h / 2;
+    const cz = p.y + p.w / 2 - W / 2;
+    const base = i * coords.length;
+    for (let k = 0; k < coords.length; k += 3) {
+      let x = coords[k];
+      let z = coords[k + 2];
+      const y = coords[k + 1];
+      if (rot === 90) {
+        const nx = z;
+        z = -x;
+        x = nx;
+      }
+      positions[base + k] = x + cx;
+      positions[base + k + 1] = y + cy;
+      positions[base + k + 2] = z + cz;
+    }
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const lines = new THREE.LineSegments(
+    geo,
+    new THREE.LineBasicMaterial({ color: 0x123a63, transparent: true, opacity: 0.7 })
+  );
+  lines.frustumCulled = false;
+  lines.userData = { skuId: item.id, layer: list[0].layer + 1, baseOpacity: 0.7 };
+  return lines;
 }
 
 /* ---------- 容器 ---------- */
@@ -282,6 +389,7 @@ function clearScene() {
   S.root = new THREE.Group();
   S.scene.add(S.root);
   S.meshes = [];
+  S.lines = [];
   Object.keys(S.dimLabels).forEach((k) => S.dimLabels[k].remove());
   S.dimLabels = {};
   S.layer = 0;
@@ -309,6 +417,14 @@ function buildInstanced(pack) {
   byKey.forEach((list) => {
     const item = pack.items.find((it) => it.id === list[0].skuId);
     if (!item) return;
+
+    // 与 geometryFor 用同一套缝隙缩放，描边才贴合箱体
+    const sv = item.shapeValues || item.bbox;
+    const gap = 4;
+    const sx = sv.l > gap * 2 ? (sv.l - gap) / sv.l : 0.9;
+    const sy = sv.h > gap * 2 ? (sv.h - gap) / sv.h : 0.9;
+    const sz = sv.w > gap * 2 ? (sv.w - gap) / sv.w : 0.9;
+
     const cacheKey = item.id + '|' + (list[0].rot === 90 ? 'r' : 'n');
     let geo = geomCache.get(cacheKey);
     if (!geo) {
@@ -329,24 +445,35 @@ function buildInstanced(pack) {
       mesh.setMatrixAt(i, m);
     });
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.userData = { skuId: item.id, layer: list[0].layer + 1 };
+    mesh.userData = { skuId: item.id, layer: list[0].layer + 1, baseOpacity: 1 };
     S.root.add(mesh);
     S.meshes.push(mesh);
+
+    // 描边合并：一箱一个 LineSegments 会有上千 draw call，这里按组只提交一个
+    const lines = makeEdges(item, list, sx, sy, sz, list[0].rot, L, W);
+    S.root.add(lines);
+    S.lines.push(lines);
   });
 }
 
 function applyFilters() {
-  S.meshes.forEach((mesh) => {
-    const layerOk = S.layer === 0 || mesh.userData.layer === S.layer;
-    const hi = S.highlight;
-    const hiOk = !hi || mesh.userData.skuId === hi;
-    mesh.visible = layerOk;
-    const dim = hi && !hiOk;
-    mesh.material.transparent = dim;
-    mesh.material.opacity = dim ? 0.12 : 1;
-    mesh.material.depthWrite = !dim;
-    mesh.material.needsUpdate = true;
-  });
+  const hi = S.highlight;
+
+  function sync(obj) {
+    const layerOk = S.layer === 0 || obj.userData.layer === S.layer;
+    const hiOk = !hi || obj.userData.skuId === hi;
+    obj.visible = layerOk;
+    const dim = !!hi && !hiOk;
+    if (obj.material) {
+      obj.material.transparent = dim;
+      obj.material.opacity = dim ? 0.1 : obj.userData.baseOpacity;
+      obj.material.depthWrite = !dim && !(obj instanceof THREE.LineSegments);
+      obj.material.needsUpdate = true;
+    }
+  }
+
+  S.meshes.forEach(sync);
+  S.lines.forEach(sync);
   S.dirty = true;
 }
 

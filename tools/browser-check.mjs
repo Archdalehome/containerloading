@@ -194,12 +194,16 @@ function pageTestScript() {
     await wait(150);
     const visCount = window.CL3D._state.meshes.filter((m) => m.visible)
       .reduce((s, m) => s + m.count, 0);
+    const visLines = window.CL3D._state.lines.filter((l) => l.visible).length;
     step('只看第 3 层是 210 箱', window.CL3D._state.layer === 3 && visCount === 210, '可见 ' + visCount + ' 箱');
+    step('描边跟随层筛选', visLines === 1, '可见描边组 ' + visLines);
     sel.value = '0';
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     await wait(100);
   }
   step('图例 1 个箱型', $$('#viewer-legend .legend-item').length === 1, $$('#viewer-legend .legend-item').length);
+  const lineVerts = window.CL3D._state.lines.reduce((s, l) => s + l.geometry.attributes.position.count, 0);
+  step('箱体描边已生成（1680 箱 × 12 边）', lineVerts === 1680 * 24, '描边顶点 ' + lineVerts);
   const dims = $$('#viewer-canvas .dim-label').map((d) => d.textContent).join('|');
   step('尺寸标注齐全', dims.includes('12032') && dims.includes('2352') && dims.includes('2698') && dims.includes('柜门'), dims);
 
@@ -287,6 +291,30 @@ try {
     clip: { x: 0, y: 0, width: WIDTH, height, scale: 1 }
   });
   fs.writeFileSync(OUT_PNG, Buffer.from(shot.data, 'base64'));
+
+  // 满柜截图（含描边）+ 放大截图，用来验收箱数是否数得清
+  const viewerRect = await cdp.evaluate(`(() => {
+    const r = document.getElementById('viewer-card').getBoundingClientRect();
+    return { x: Math.round(r.left + window.scrollX), y: Math.round(r.top + window.scrollY),
+             width: Math.round(r.width), height: Math.round(r.height) };
+  })()`);
+  await cdp.evaluate("window.CL3D.setView({ theta: 0.86, phi: 1.0, radius: 12000 }); true");
+  await sleep(400);
+  const shotFull = await cdp.send('Page.captureScreenshot', {
+    format: 'png', captureBeyondViewport: true,
+    clip: { x: viewerRect.x, y: viewerRect.y, width: viewerRect.width, height: viewerRect.height, scale: 1 }
+  });
+  const out1680 = OUT_PNG.replace('.png', '-1680.png');
+  fs.writeFileSync(out1680, Buffer.from(shotFull.data, 'base64'));
+
+  await cdp.evaluate("window.CL3D.setView({ theta: 0.86, phi: 1.02, radius: 7800 }); true");
+  await sleep(400);
+  const shotZoom = await cdp.send('Page.captureScreenshot', {
+    format: 'png', captureBeyondViewport: true,
+    clip: { x: viewerRect.x, y: viewerRect.y, width: viewerRect.width, height: viewerRect.height, scale: 1 }
+  });
+  const outZoom = OUT_PNG.replace('.png', '-1680-zoom.png');
+  fs.writeFileSync(outZoom, Buffer.from(shotZoom.data, 'base64'));
 
   const mixed = await cdp.evaluate(`(async () => {
     const wait = (ms) => new Promise(r => setTimeout(r, ms));
