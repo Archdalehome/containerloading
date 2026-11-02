@@ -93,7 +93,9 @@ lines.push('|---|---|---|---|');
 
 scenarios.forEach((s) => {
   const v1 = fmt(P1.run({ container: c40hq, rows: s.rows.map((r) => Object.assign({}, r)) }));
-  const v2off = fmt(P2.run({ container: c40hq, rows: s.rows.map((r) => Object.assign({}, r)), options: { allowFill: false } }));
+  // v2 默认 = 产品默认：斜顶开启倒放（只用于对扣）、L 形不勾、侧放关、填缝关
+  const rowsDefault = s.rows.map((r) => Object.assign({}, r, { allowFlip: r.shape === 'slope', allowSide: false }));
+  const v2off = fmt(P2.run({ container: c40hq, rows: rowsDefault, options: { allowFill: false } }));
   const rowsOn = s.rows.map((r) => Object.assign({}, r, { allowFlip: true, allowSide: true }));
   const v2on = fmt(P2.run({ container: c40hq, rows: rowsOn, options: { allowFill: true } }));
   lines.push('| ' + s.name + ' | ' + cell(v1) + ' | ' + cell(v2off) + ' | ' + cell(v2on) + ' |');

@@ -98,6 +98,8 @@
       var isSide = vertical !== 2;
       var isFlip = upSign < 0;
 
+      // 斜顶箱只允许正放与配对用倒放：侧放后顶面不是完整水平面，叠不了，没有实用价值
+      if (item.shape === 'slope' && isSide) continue;
       if (isSide && !item.allowSide) continue;
       if (isFlip && !item.allowFlip) continue;
       // H 朝上但底朝上（即倒放）已在 isFlip 里处理；侧放且底朝上同样需要可倒放
@@ -138,6 +140,8 @@
     var bestTotal = -1;
     for (var i = 0; i < poses.length; i++) {
       var pose = poses[i];
+      // 倒放只允许出现在对扣里：单独倒放的斜面朝下/箱子倒扣都不合法
+      if (pose.flip) continue;
       if (pose.thickness > roomH + EPS) continue;
       if (pose.thickness > c.doorH + EPS) continue;
       var cap = capacityOf(pose, c);
@@ -192,6 +196,82 @@
       if (y < F.y + F.w - eps) return false;
     }
     return true;
+  }
+
+  /**
+   * L 形箱正放时的水平台阶面（局部 x∈[0,L]、y∈[0,W低]、z=H低），返回容器坐标矩形。
+   * 只有正放（姿态矩阵的竖直轴朝上）才有水平台阶面；倒放、侧放的台阶是竖面，不承重。
+   */
+  /** 把箱体局部坐标系里的一个水平矩形映射到容器坐标（处理带负号的姿态矩阵） */
+  function mapLocalRect(item, p, x0, x1, y0, y1, zLocal) {
+    var sv = item.shapeValues;
+    var m = p.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    var minX = Infinity;
+    var minY = Infinity;
+    for (var i = 0; i < 8; i++) {
+      var vx = (i & 1) ? sv.l : 0;
+      var vy = (i & 2) ? sv.w : 0;
+      var vz = (i & 4) ? sv.h : 0;
+      minX = Math.min(minX, m[0] * vx + m[1] * vy + m[2] * vz);
+      minY = Math.min(minY, m[3] * vx + m[4] * vy + m[5] * vz);
+    }
+    var xs = [];
+    var ys = [];
+    [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].forEach(function (c) {
+      xs.push(p.x + (m[0] * c[0] + m[1] * c[1] + m[2] * zLocal) - minX);
+      ys.push(p.y + (m[3] * c[0] + m[4] * c[1] + m[5] * zLocal) - minY);
+    });
+    var ax = Math.min.apply(null, xs);
+    var ay = Math.min.apply(null, ys);
+    return { x: ax, y: ay, l: Math.max.apply(null, xs) - ax, w: Math.max.apply(null, ys) - ay };
+  }
+
+  function stepSurface(item, p) {
+    if (!item || item.shape !== 'lshape') return null;
+    if (!p.pose || p.pose[8] !== 1) return null;
+    var sv = item.shapeValues;
+    var r = mapLocalRect(item, p, 0, sv.l, 0, sv.wlow, sv.hlow);
+    return { z: p.z + sv.hlow, x: r.x, y: r.y, l: r.l, w: r.w };
+  }
+
+  /**
+   * 对扣可行判定：
+   *   斜顶箱：斜面互补，恒可行
+   *   L 形箱：只有台阶对称（|W低 − W高| ≤ 1mm）时两只才能严丝合缝拼成 W×(H低+H高)，
+   *           不对称时两只会互相穿插（实测 160/240 重叠近 2 万个采样点）
+   */
+  function pairFeasible(item) {
+    if (!item) return false;
+    if (item.shape === 'slope') return true;
+    if (item.shape === 'lshape') return Math.abs(item.shapeValues.wlow - item.shapeValues.whigh) <= 1;
+    return false;
+  }
+
+  /**
+   * 一只箱子提供的水平承重面。
+   *   - 斜顶箱：斜面不能承重；只有对扣上件（倒放）的顶面是平的，可以承重
+   *   - L 形箱：正放时高段顶面（H高）与台阶顶面（H低）都是水平面；侧放/倒放不给承重面（保守）
+   *   - 矩形箱：顶面
+   */
+  function surfacesOf(item, p) {
+    if (!item) return [];
+    var sv = item.shapeValues;
+    var full = { x: p.x, y: p.y, l: p.l, w: p.w };
+    if (item.shape === 'slope') {
+      if (p.kind === 'pair-upper') return [{ z: p.z + p.h, rect: full }];
+      return [];
+    }
+    if (item.shape === 'lshape') {
+      if (p.kind === 'pair-upper-l') return [{ z: p.z + p.h, rect: full }];
+      if (!p.pose || p.pose[8] !== 1) return [];
+      var tall = mapLocalRect(item, p, 0, sv.l, sv.wlow, sv.w, sv.h);
+      var step = mapLocalRect(item, p, 0, sv.l, 0, sv.wlow, sv.hlow);
+      return [
+        { z: p.z + sv.h, rect: tall },
+        { z: p.z + sv.hlow, rect: step }
+      ];
+    }
+    return [{ z: p.z + p.h, rect: full }];
   }
 
   /* ---------- 构建 SKU ---------- */
@@ -276,14 +356,23 @@
     var weightKnown = items.every(function (it) { return it.unitWeight !== null; });
     var stop = { code: 'all-loaded', message: '全部装载完成' };
 
-    // 支撑索引：key 为顶面高度，值为该高度的箱体底面矩形
+    // 支撑索引：key 为水平面高度，值为该高度上可以承重的矩形
     var topIndex = {};
+    var itemsById = {};
+    items.forEach(function (it) { itemsById[it.id] = it; });
 
     function keyOf(h) { return Math.round(h * 1000); }
 
+    function addSurface(z, rect) {
+      var k = keyOf(z);
+      (topIndex[k] = topIndex[k] || []).push(rect);
+    }
+
     function addSupport(p) {
-      var k = keyOf(p.z + p.h);
-      (topIndex[k] = topIndex[k] || []).push({ x: p.x, y: p.y, l: p.l, w: p.w });
+      var it = itemsById[p.skuId];
+      surfacesOf(it, p).forEach(function (s) {
+        addSurface(s.z, s.rect);
+      });
     }
 
     function supportedAt(x, y, l, w, zz) {
@@ -306,15 +395,27 @@
 
       var cand = null;
       var candPose = null;
+      var slopeFallback = null;
       for (var i = 0; i < sorted.length; i++) {
         var it = sorted[i];
         if (it.remaining <= 0 || !it.placeable) continue;
         var pose = bestPose(it, c, c.innerH - z);
         if (!pose) continue;
-        // 单层里至少能放下一箱（原点那一格是否被支撑不影响后面几格，这里粗略放行）
+        // 斜顶单只、以及不可对扣的 L 形：顶面不是完整水平面，一旦放上去就不能再叠，
+        // 所以让它们排在最后当顶层的备选，先把高度让给能叠的箱型。
+        var topOnly = (it.shape === 'slope' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2)) ||
+          (it.shape === 'lshape' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2));
+        if (topOnly) {
+          if (!slopeFallback) slopeFallback = { item: it, pose: pose };
+          continue;
+        }
         cand = it;
         candPose = pose;
         break;
+      }
+      if (!cand && slopeFallback) {
+        cand = slopeFallback.item;
+        candPose = slopeFallback.pose;
       }
       if (!cand) {
         var anyPlaceable = sorted.some(function (x) { return x.remaining > 0 && x.placeable; });
@@ -326,9 +427,10 @@
 
       var posCap = capacityOf(candPose, c);
 
-      // 斜顶对扣：一正一倒，每对占 H低+H高；底件固定用「正放」，和最优单层方案比总箱数
+      // 对扣：一正一倒，每对占 H低+H高；底件固定用「正放」，和最优单层方案比总箱数。
+      // 斜顶恒可行；L 形只有台阶对称才可行，不对称直接不参与对扣（退回单放 + 缺口嵌合）。
       var pair = null;
-      if (cand.shape === 'slope' && cand.allowFlip) {
+      if (cand.allowFlip && pairFeasible(cand)) {
         var sv = cand.shapeValues;
         var pairThickness = sv.hlow + sv.h;
         var roomLeft = c.innerH - z;
@@ -347,7 +449,9 @@
                 lower: hup,
                 upper: flipPose,
                 cap: hupCap,
-                pairsPerLayer: pairsPerLayer
+                pairsPerLayer: pairsPerLayer,
+                offset: sv.hlow,
+                upperKind: cand.shape === 'lshape' ? 'pair-upper-l' : 'pair-upper'
               };
             }
           }
@@ -384,9 +488,9 @@
             };
             var upper = {
               skuId: cand.id, index: items.indexOf(cand), col: pc + 1, row: pr + 1,
-              x: px, y: py, z: layerZ + cand.shapeValues.hlow,
+              x: px, y: py, z: layerZ + pair.offset,
               l: pair.upper.fx, w: pair.upper.fy, h: pair.upper.thickness,
-              rot: 90, layer: layerIndex, pose: pair.upper.m, kind: 'pair-upper'
+              rot: 90, layer: layerIndex, pose: pair.upper.m, kind: pair.upperKind
             };
             placements.push(lower);
             addSupport(lower);
@@ -478,6 +582,61 @@
         });
       }
 
+      // L 形缺口嵌合：低段台阶顶面是水平面，可以在缺口里塞别的小箱（这才是 L 形省空间的正确用法）
+      if (!pair && cand.shape === 'lshape') {
+        var svL = cand.shapeValues;
+        var stepZ = layerZ + svL.hlow;
+        var sRects = [];
+        placements.forEach(function (q) {
+          if (q.layer !== layerIndex) return;
+          var st = stepSurface(cand, q);
+          if (st) sRects.push(st);
+        });
+        if (sRects.length) {
+          var nx0 = Infinity, nx1 = -Infinity, ny0 = Infinity, ny1 = -Infinity;
+          sRects.forEach(function (r) {
+            nx0 = Math.min(nx0, r.x); nx1 = Math.max(nx1, r.x + r.l);
+            ny0 = Math.min(ny0, r.y); ny1 = Math.max(ny1, r.y + r.w);
+          });
+          var notch = { x: nx0, y: ny0, l: nx1 - nx0, w: ny1 - ny0 };
+          var notchH = svL.hhigh - svL.hlow;
+          var nf = pickFiller(notch, notchH, stepZ, cand, items, sorted, c, weightKnown, usedWeight);
+          if (nf) {
+            var nMax = Math.min(nf.cap.cap, nf.item.remaining);
+            if (weightKnown && nf.item.unitWeight > 0) {
+              nMax = Math.min(nMax, Math.floor((c.payload - usedWeight) / nf.item.unitWeight));
+            }
+            var nPlaced = 0;
+            for (var nr = 0; nr < nf.cap.ny && nPlaced < nMax; nr++) {
+              for (var nc = 0; nc < nf.cap.nx && nPlaced < nMax; nc++) {
+                var gx = notch.x + nc * nf.pose.fx;
+                var gy = notch.y + nr * nf.pose.fy;
+                if (gx + nf.pose.fx > notch.x + notch.l + EPS) continue;
+                if (gy + nf.pose.fy > notch.y + notch.w + EPS) continue;
+                if (!supportedAt(gx, gy, nf.pose.fx, nf.pose.fy, stepZ)) continue;
+                var np = {
+                  skuId: nf.item.id, index: items.indexOf(nf.item),
+                  col: nc + 1, row: nr + 1,
+                  x: gx, y: gy, z: stepZ, l: nf.pose.fx, w: nf.pose.fy, h: nf.pose.thickness,
+                  rot: 0, layer: layerIndex, pose: nf.pose.m, kind: 'notch'
+                };
+                placements.push(np);
+                addSupport(np);
+                nPlaced++;
+                nf.item.loaded++;
+                nf.item.remaining--;
+                loadedCount++;
+                fillTotal++;
+                usedWeight += (nf.item.unitWeight || 0);
+              }
+            }
+            if (nPlaced > 0) {
+              layerFill.push({ skuId: nf.item.id, name: nf.item.name, count: nPlaced, notch: true });
+            }
+          }
+        }
+      }
+
       layers.push({
         index: layerIndex,
         skuId: cand.id,
@@ -495,6 +654,12 @@
       });
 
       z = layerTop;
+
+      // 斜顶单只顶部是斜面，不能承重：这一层必须是最后一层
+      if (!pair && cand.shape === 'slope') {
+        stop = { code: 'slope-top', message: '斜顶箱单只顶部是斜面，不能再往上叠（已按最高层计算）' };
+        break;
+      }
 
       if (weightKnown && unitW > 0 && weightRoom() < unitW) {
         stop = { code: 'weight', message: '达到最大载重 ' + S.num(c.payload) + ' kg，停止装载' };
@@ -600,6 +765,8 @@
     for (var i = 0; i < sorted.length; i++) {
       var it = sorted[i];
       if (it.remaining <= 0 || !it.placeable) continue;
+      // 斜顶箱的顶面是斜面（或需要靠配对才能变平），不能当填缝件——上面再压箱就不合法
+      if (it.shape === 'slope') continue;
       if (it.id === baseItem.id && it.remaining <= 0) continue;
       var poses = posesFor(it);
       for (var j = 0; j < poses.length; j++) {
@@ -688,9 +855,93 @@
     };
   }
 
+  /**
+   * 物理校验（每条都有对应的反向用例在测试里）：
+   *   1. 每箱下方必须被同高度的水平面完整覆盖（斜面、台阶竖面不算）
+   *   2. 斜顶单只上方不得压任何箱
+   *   3. 对扣必须有下件、贴合误差 ≤ 1mm、上件必须是倒放
+   * 返回错误数组，空数组 = 通过。
+   */
+  function validatePhysics(pack) {
+    var errs = [];
+    var itemsById = {};
+    (pack.items || []).forEach(function (it) { itemsById[it.id] = it; });
+    var surface = {};
+    function key(h) { return Math.round(h * 1000); }
+    function pushSurface(z, r) {
+      var k = key(z);
+      (surface[k] = surface[k] || []).push(r);
+    }
+
+    (pack.placements || []).forEach(function (p) {
+      surfacesOf(itemsById[p.skuId], p).forEach(function (s) {
+        var k = key(s.z);
+        (surface[k] = surface[k] || []).push(s.rect);
+      });
+    });
+
+    // 1. 支撑（对扣上件由下件贴合支撑，单独在第 3 条校验）
+    (pack.placements || []).forEach(function (p) {
+      if (p.z <= EPS) return;
+      if (p.kind === 'pair-upper' || p.kind === 'pair-upper-l') return;
+      var rects = surface[key(p.z)] || [];
+      if (!covers({ x: p.x, y: p.y, l: p.l, w: p.w }, rects)) {
+        errs.push({ code: 'floating', message: '箱体悬空：底部无完整支撑面', placement: p });
+      }
+    });
+
+    // 2. 斜顶单只上方不得有箱
+    (pack.placements || []).forEach(function (p) {
+      var it = itemsById[p.skuId];
+      if (!it || it.shape !== 'slope') return;
+      if (p.kind === 'pair-lower' || p.kind === 'pair-upper') return;
+      (pack.placements || []).forEach(function (q) {
+        if (q === p) return;
+        if (q.z < p.z + p.h - EPS) return;
+        if (q.x < p.x + p.l - EPS && q.x + q.l > p.x + EPS &&
+            q.y < p.y + p.w - EPS && q.y + q.w > p.y + EPS) {
+          errs.push({ code: 'slope-top-loaded', message: '斜顶箱单只上方压了箱子', placement: p, by: q });
+        }
+      });
+    });
+
+    // 3. 对扣贴合
+    var lowers = {};
+    var uppers = {};
+    (pack.placements || []).forEach(function (p) {
+      var k = p.layer + '|' + p.x + '|' + p.y;
+      if (p.kind === 'pair-lower') lowers[k] = p;
+      if (p.kind === 'pair-upper' || p.kind === 'pair-upper-l') uppers[k] = p;
+    });
+    Object.keys(uppers).forEach(function (k) {
+      var u = uppers[k];
+      var l = lowers[k];
+      var it = itemsById[u.skuId];
+      if (!l) {
+        errs.push({ code: 'pair-without-lower', message: '对扣上件没有下件', placement: u });
+        return;
+      }
+      var offset = it && it.shapeValues ? it.shapeValues.hlow : 0;
+      if (Math.abs(u.z - (l.z + offset)) > 1) {
+        errs.push({ code: 'pair-gap', message: '对扣接触面错位 ' + S.num(Math.abs(u.z - (l.z + offset))) + ' mm', placement: u });
+      }
+      if (!u.pose || u.pose[8] !== -1) {
+        errs.push({ code: 'pair-not-flipped', message: '对扣上件不是倒放', placement: u });
+      }
+      if (it && it.shape === 'lshape' && Math.abs(it.shapeValues.wlow - it.shapeValues.whigh) > 1) {
+        errs.push({ code: 'pair-asymmetric-l', message: '不对称 L 形不允许对扣', placement: u });
+      }
+    });
+
+    return errs;
+  }
+
   NS.pack = {
     run: run,
     extraContainers: extraContainers,
+    validatePhysics: validatePhysics,
+    stepSurface: stepSurface,
+    pairFeasible: pairFeasible,
     // 兼容旧接口
     bestOrientation: function (bb, c) {
       var a = { nx: Math.floor((c.innerL + EPS) / bb.l), ny: Math.floor((c.innerW + EPS) / bb.w), rot: 0, l: bb.l, w: bb.w };

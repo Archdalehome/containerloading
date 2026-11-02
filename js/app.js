@@ -31,7 +31,10 @@
       name: '',
       values: Object.assign({}, s.defaults),
       qty: '1',
-      weight: ''
+      weight: '',
+      // 斜顶箱默认允许倒放——但只用于对扣（引擎里单独倒放是被禁止的）
+      allowFlip: s.key === 'slope',
+      allowSide: false
     };
   }
 
@@ -50,7 +53,7 @@
       values: values,
       qty: raw && raw.qty !== undefined && raw.qty !== null && raw.qty !== '' ? String(raw.qty) : '1',
       weight: raw && raw.weight !== undefined && raw.weight !== null ? String(raw.weight) : '',
-      allowFlip: !!(raw && raw.allowFlip),
+      allowFlip: raw && raw.allowFlip !== undefined ? !!raw.allowFlip : (s.key === 'slope'),
       allowSide: !!(raw && raw.allowSide)
     };
   }
@@ -103,6 +106,9 @@
         });
         row.shape = next.key;
         row.values = merged;
+        // 切到斜顶默认允许倒放（仅用于对扣）；切到 L 形默认不勾
+        if (next.key === 'slope') row.allowFlip = true;
+        if (next.key === 'lshape') row.allowFlip = false;
         ST.save(state);
         rowsUI.renderAll();
         CL.ui.result.markStale();

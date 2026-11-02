@@ -52,11 +52,14 @@ function assertNoOverlap(pack, label) {
   const ps = pack.placements;
   // 对扣的一对：外接体在高度上必然交叠，但真实形状互补不重叠，单独用几何断言校验
   const isPairMate = (a, b) => a.layer === b.layer && a.x === b.x && a.y === b.y &&
-    ((a.kind === 'pair-lower' && b.kind === 'pair-upper') ||
-     (a.kind === 'pair-upper' && b.kind === 'pair-lower'));
+    ((a.kind === 'pair-lower' && (b.kind === 'pair-upper' || b.kind === 'pair-upper-l')) ||
+     (a.kind === 'pair-upper' && b.kind === 'pair-lower') ||
+     (a.kind === 'pair-upper-l' && b.kind === 'pair-lower'));
+  // 缺口嵌合箱：落在 L 形台阶上，外接体必然被 L 箱的外接体包住，但不在其实体里
+  const isNotchMate = (a, b) => a.layer === b.layer && (a.kind === 'notch' || b.kind === 'notch');
   for (let i = 0; i < ps.length; i++) {
     for (let j = i + 1; j < ps.length; j++) {
-      if (isPairMate(ps[i], ps[j])) continue;
+      if (isPairMate(ps[i], ps[j]) || isNotchMate(ps[i], ps[j])) continue;
       if (P.overlaps(ps[i], ps[j])) {
         throw new Error((label || '') + ' 堆叠重叠: ' + JSON.stringify(ps[i]) + ' × ' + JSON.stringify(ps[j]));
       }
@@ -117,6 +120,7 @@ test('1680 箱逐箱不越界', () => {
   const c = C.get('40HQ');
   const r = P.run(state(c, [row('a', { L: '400', W: '300', H: '300' }, 1680)]));
   assertInBounds(r, r.container);
+  assert.deepStrictEqual(P.validatePhysics(r), [], '1680 基准必须过物理校验');
 });
 
 test('每箱重 20kg：载重 26500 先撞上限，只装 1325 箱并说明原因', () => {
@@ -246,7 +250,7 @@ test('200 组随机 SKU 全部满足几何与载重约束', () => {
 
     assertInBounds(r, r.container, tag);
     assertNoOverlap(r, tag);
-    assertSupported(r, tag);
+    assert.deepStrictEqual(P.validatePhysics(r), [], tag + ' 物理校验未通过');
 
     const sumLayers = r.layers.reduce((s, l) => s + l.count, 0);
     assert.strictEqual(sumLayers, r.placements.length, tag + ' 分层箱数与明细不一致');
@@ -305,11 +309,11 @@ function slopeRow(qty, extra) {
   return Object.assign(row('s', { L: '600', W: '400', Hlow: '300', Hhigh: '500' }, qty, '', 'slope'), extra || {});
 }
 
-test('默认关：斜顶 500 箱、装载率 62.9%（与 v1 一致）', () => {
+test('斜顶不开倒放：只能放一层（斜面不能承重），100 箱', () => {
   const r = P.run(state(C.get('40HQ'), [slopeRow(1000)]));
-  assert.strictEqual(r.totals.loadedCount, 500);
-  assert.strictEqual(r.layers.length, 5);
-  assert.ok(Math.abs(r.totals.fillRate - 0.629) < 0.001);
+  assert.strictEqual(r.totals.loadedCount, 100, '斜顶单只上方不能再叠');
+  assert.strictEqual(r.layers.length, 1);
+  assert.deepStrictEqual(P.validatePhysics(r), []);
 });
 
 test('可倒放：斜顶对扣 500 → 600 箱，3 个对扣层，每层 800mm', () => {
@@ -337,6 +341,37 @@ test('对扣上件确实倒放（底面朝上）且贴在下件上', () => {
     assert.ok(l, '找不到对应下件');
     assert.strictEqual(u.z, l.z + 300, '上件底面应落在下件的 H低 高度');
   }
+});
+
+test('L 形台阶对称（W低=W高）时可以倒放对扣', () => {
+  const rowL = row('l', { L: '600', W: '400', Wlow: '200', Whigh: '200', Hlow: '300', Hhigh: '500' }, 1000, '', 'lshape');
+  rowL.allowFlip = true;
+  const r = P.run(state(C.get('40HQ'), [rowL]));
+  const pairs = r.placements.filter((p) => p.kind === 'pair-lower');
+  assert.ok(pairs.length > 0, '对称台阶应能对扣');
+  assert.ok(r.totals.loadedCount > 500, '对扣后应高于单放 500，实际 ' + r.totals.loadedCount);
+  assert.deepStrictEqual(P.validatePhysics(r), []);
+});
+
+test('L 形台阶不对称（160/240）时禁止对扣，退回单放 + 缺口嵌合', () => {
+  const rowL = row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '', 'lshape');
+  rowL.allowFlip = true;
+  const r = P.run(state(C.get('40HQ'), [rowL]));
+  assert.strictEqual(r.placements.filter((p) => p.kind.indexOf('pair') === 0).length, 0, '不对称 L 形出现了对扣');
+  assert.ok(r.layers.every((L) => L.kind !== 'pair'));
+  assert.deepStrictEqual(P.validatePhysics(r), []);
+});
+
+test('缺口嵌合：L 形台阶上能塞进小箱，且不悬空', () => {
+  const rows = [
+    row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 200, '', 'lshape'),
+    row('s', { L: '200', W: '150', H: '200' }, 2000, '', 'rect')
+  ];
+  const r = P.run(state(C.get('40HQ'), rows, false));
+  const notch = r.placements.filter((p) => p.kind === 'notch');
+  assert.ok(notch.length > 0, '缺口里没有嵌合箱');
+  assert.ok(notch.every((p) => p.z > 0), '嵌合箱应落在台阶高度上');
+  assert.deepStrictEqual(P.validatePhysics(r), []);
 });
 
 test('可侧放：100×100×2000 从 2760 提升到 3588（+30%）', () => {
@@ -434,6 +469,68 @@ test('补柜计算受载重限制：大量重箱按重量分柜', () => {
   assert.strictEqual(r.totals.loadedCount, 1325);
   assert.strictEqual(ex.count, 3, '还需 ' + ex.count + ' 个柜');
   assert.strictEqual(ex.leftOver, 0);
+});
+
+// ---------- 物理断言的反向用例 ----------
+console.log('\n物理断言的反向用例（必须能抓出来）');
+
+const slopeItem = {
+  id: 's', shape: 'slope', shapeName: '斜顶箱', index: 0,
+  shapeValues: { l: 600, w: 400, h: 500, hlow: 300, hhigh: 500 },
+  bbox: { l: 600, w: 400, h: 500 }
+};
+const asymLItem = {
+  id: 'l', shape: 'lshape', shapeName: 'L形箱', index: 1,
+  shapeValues: { l: 600, w: 400, h: 500, wlow: 160, whigh: 240, hlow: 300, hhigh: 500 },
+  bbox: { l: 600, w: 400, h: 500 }
+};
+
+test('斜面承重：斜顶箱顶上再放箱必须报错', () => {
+  const pack = {
+    items: [slopeItem],
+    placements: [
+      { skuId: 's', x: 0, y: 0, z: 0, l: 600, w: 400, h: 500, layer: 0, kind: 'normal', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      { skuId: 's', x: 0, y: 0, z: 500, l: 600, w: 400, h: 500, layer: 1, kind: 'normal', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] }
+    ]
+  };
+  const errs = P.validatePhysics(pack);
+  assert.ok(errs.some((e) => e.code === 'floating' || e.code === 'slope-top-loaded'), JSON.stringify(errs.map((e) => e.code)));
+});
+
+test('单只斜顶上方压箱：单独构造一个「斜顶上方有箱」的摆法必须被 slope-top-loaded 抓到', () => {
+  // 把下件标记成对扣下件时不该报；正常单只时上层有箱要报
+  const pack = {
+    items: [slopeItem],
+    placements: [
+      { skuId: 's', x: 0, y: 0, z: 0, l: 600, w: 400, h: 500, layer: 0, kind: 'normal', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      { skuId: 's', x: 0, y: 0, z: 500, l: 600, w: 400, h: 500, layer: 1, kind: 'normal', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] }
+    ]
+  };
+  assert.ok(P.validatePhysics(pack).some((e) => e.code === 'slope-top-loaded'));
+});
+
+test('对扣错位 2mm 必须报 pair-gap', () => {
+  const pack = {
+    items: [slopeItem],
+    placements: [
+      { skuId: 's', x: 0, y: 0, z: 0, l: 600, w: 400, h: 500, layer: 0, kind: 'pair-lower', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      { skuId: 's', x: 0, y: 0, z: 302, l: 600, w: 400, h: 500, layer: 0, kind: 'pair-upper', pose: [-1, 0, 0, 0, 1, 0, 0, 0, -1] }
+    ]
+  };
+  const errs = P.validatePhysics(pack);
+  assert.ok(errs.some((e) => e.code === 'pair-gap'), JSON.stringify(errs.map((e) => e.code)));
+});
+
+test('不对称 L 形硬做对扣必须报 pair-asymmetric-l', () => {
+  const pack = {
+    items: [asymLItem],
+    placements: [
+      { skuId: 'l', x: 0, y: 0, z: 0, l: 600, w: 400, h: 500, layer: 0, kind: 'pair-lower', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      { skuId: 'l', x: 0, y: 0, z: 300, l: 600, w: 400, h: 500, layer: 0, kind: 'pair-upper-l', pose: [-1, 0, 0, 0, 1, 0, 0, 0, -1] }
+    ]
+  };
+  const errs = P.validatePhysics(pack);
+  assert.ok(errs.some((e) => e.code === 'pair-asymmetric-l'), JSON.stringify(errs.map((e) => e.code)));
 });
 
 console.log('\n' + passed + ' 通过，' + failures.length + ' 失败\n');
