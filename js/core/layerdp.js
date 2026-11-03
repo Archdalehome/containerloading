@@ -27,14 +27,14 @@
       Math.max(0, Math.floor((c.innerW + 1e-6) / pose.fy));
   }
 
-  /** 顶面能不能继续往上叠：取真实顶面，要求覆盖整层底面且高度一致 */
-  function topStackable(item, pose, p) {
-    if (!NS.pack.facesRel) return true;
-    var f = NS.pack.facesRel(item, pose.m, pose.fx, pose.fy, pose.thickness);
-    if (!f.top || !f.top.length) return false;
-    var area = 0;
-    f.top.forEach(function (r) { area += r.l * r.w; });
-    return area >= pose.fx * pose.fy - 1;
+  /**
+   * 顶面能不能继续往上叠：所有承重面必须都在本层层厚的高度上、且盖满整层底面。
+   * 直接复用引擎的 poseStackable，避免两边各有一份口径（正放 L 的台阶面比顶面低，
+   * 只按面积求和会把「台阶 + 顶面」当成一整块平顶，704×482 的参考解就是这么算错的）。
+   */
+  function topStackable(item, pose) {
+    if (!NS.pack.poseStackable) return true;
+    return NS.pack.poseStackable(item, pose);
   }
 
   /** 一个 SKU 在给定容器里能贡献的所有层型（带覆盖矩形：这一层实际盖住多大底面） */

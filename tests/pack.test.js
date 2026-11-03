@@ -220,7 +220,7 @@ test('对称台阶 235/235：对扣可用，≥ 53 箱且物理校验通过（�
   assert.deepStrictEqual(P.validatePhysics(ps.best.pack), [], '对扣方案必须过物理校验');
 });
 
-test('不对称台阶 200/270：不垫块只能 33 箱（第二层只落在 270 条带上），垫块后 60 箱', () => {
+test('不对称台阶 200/270：侧放后顶面变平，5 层 × 13 箱 = 65 箱（垫块不再带来增量）', () => {
   const mkRow = () => {
     const r = row('a', { L: '2000', W: '470', Wlow: '200', Whigh: '270', Hlow: '325', Hhigh: '900' }, 200, '5', 'lshape');
     r.allowSide = true;
@@ -228,10 +228,13 @@ test('不对称台阶 200/270：不垫块只能 33 箱（第二层只落在 270 
     return r;
   };
   const noDun = P.runPlans({ container: C.get('40GP'), rows: [mkRow()], options: {} });
-  assert.strictEqual(noDun.best.boxes, 33, '不垫块应为 33 箱，实际 ' + noDun.best.boxes);
+  // 旧口径是 33：当时把「不对称 L 形」整型判成顶层专属，只用了正放台阶，
+  // 第二层只能落在 270 条带上。侧放后顶面是完整平面，40GP 里 900×2000 底面摆 13 个 × 5 层 = 65。
+  // 层型背包同一条输入也是 65，两条路径一致。
+  assert.strictEqual(noDun.best.boxes, 65, '侧放 5 层应为 65 箱，实际 ' + noDun.best.boxes);
   assert.deepStrictEqual(P.validatePhysics(noDun.best.pack), []);
   const dun = P.runPlans({ container: C.get('40GP'), rows: [mkRow()], options: { allowDunnage: true } });
-  assert.strictEqual(dun.best.boxes, 60, '垫平缺口后应为 2 层 60 箱，实际 ' + dun.best.boxes);
+  assert.ok(dun.best.boxes >= 65, '垫平缺口不能比不垫更差，实际 ' + dun.best.boxes);
   assert.deepStrictEqual(P.validatePhysics(dun.best.pack), []);
 });
 

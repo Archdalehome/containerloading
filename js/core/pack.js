@@ -135,12 +135,35 @@
   }
 
   /**
+   * 这个姿态铺成一整层后，顶面是不是一块完整、水平的矩形（能继续往上叠）。
+   * 按真实接触面判：所有朝上的承重面都必须正好在本层层厚的高度上，且面积盖满整层底面。
+   * 正放 L 形的台阶面比顶面低 137mm（704×482 那单），它不算「顶面平整」——
+   * 上层箱子会有一半悬在缺口上方；之前只按面积求和，把台阶也算进去，才误判成可叠。
+   */
+  function poseStackable(item, pose) {
+    var f = facesRel(item, pose.m, pose.fx, pose.fy, pose.thickness);
+    if (!f.top || !f.top.length) return false;
+    var area = 0;
+    for (var i = 0; i < f.top.length; i++) {
+      var r = f.top[i];
+      if (r.z < pose.thickness - 1) return false; // 有低于层厚的承重面 → 不是平面
+      area += r.l * r.w;
+    }
+    return area >= pose.fx * pose.fy - 1;
+  }
+
+  /**
    * 在允许姿态里挑「剩余高度内能装最多箱」的：
-   *   score = floor(剩余高度 / 层厚) × 每层箱数
+   *   score = 能叠的层数 × 每层箱数
+   *   层数 = 顶面平整时 floor(剩余高度 / 层厚)，顶面不平整时只有 1 层（上面不能再压）
    * 只看每层箱数/层厚会在层数取整时倒挂（例如 500 厚能叠 5 层、600 厚只能 4 层），
    * 所以直接把剩余高度算进去。同分保持先出现的姿态（H 朝上、不旋转），与 v1 一致。
+   *
+   * opts.stackableOnly：只要「这一层上面还能继续叠」的姿态。
+   * opts.notchFilled：正放 L 形的台阶会用垫块/别的箱型填平，此时正放层也可以连续叠。
    */
-  function bestPose(item, c, roomH) {
+  function bestPose(item, c, roomH, opts) {
+    var wantStackable = !!(opts && opts.stackableOnly);
     var poses = posesFor(item);
     var best = null;
     var bestTotal = -1;
@@ -158,7 +181,14 @@
       if (pose.thickness > c.doorH + EPS) continue;
       var cap = capacityOf(pose, c);
       if (cap.cap <= 0) continue;
-      var layers = Math.floor((roomH + EPS) / pose.thickness);
+      var stackable = poseStackable(item, pose);
+      // 正放 L 形（台阶面朝上）在缺口被填平时也能一层层叠
+      if (!stackable && opts && opts.notchFilled && item.shape === 'lshape' &&
+          pose.vertical === 2 && pose.thickness === item.shapeValues.h) {
+        stackable = true;
+      }
+      if (wantStackable && !stackable) continue;
+      var layers = stackable ? Math.floor((roomH + EPS) / pose.thickness) : 1;
       var total = layers * cap.cap;
       if (total > bestTotal) {
         best = pose;
@@ -697,28 +727,32 @@
 
       var cand = null;
       var candPose = null;
-      var slopeFallback = null;
+      var topFallback = null;
+      var roomNow = c.innerH - z;
       for (var i = 0; i < sorted.length; i++) {
         var it = sorted[i];
         if (it.remaining <= 0 || !it.placeable) continue;
-        var pose = bestPose(it, c, c.innerH - z);
-        if (!pose) continue;
-        // 斜顶单只、以及不可对扣的 L 形：顶面不是完整水平面，一旦放上去就不能再叠，
-        // 所以让它们排在最后当顶层的备选，先把高度让给能叠的箱型。
-        var topOnly = (it.shape === 'slope' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2)) ||
-          (it.shape === 'lshape' && !(it.allowFlip && pairFeasible(it) && it.remaining >= 2) &&
-            !notchFillPossible(it, sorted, opts.allowDunnage));
-        if (topOnly) {
-          if (!slopeFallback) slopeFallback = { item: it, pose: pose };
+        var anyPose = bestPose(it, c, roomNow);
+        if (!anyPose) continue;
+        // 「这一层上面还能不能继续叠」是按姿态判的，不是按箱型判的：
+        // 正放 L 形的顶面是台阶（不能叠），但同一个箱子侧放后顶面就是完整平面（能叠）。
+        // 之前整型判成「顶层专属」，侧放能叠的那条路就永远走不到了
+        // （704×482 只给 72 箱、471×702 只给 75 箱都是这个原因）。
+        var stackPose = bestPose(it, c, roomNow, {
+          stackableOnly: true,
+          notchFilled: it.shape === 'lshape' && notchFillPossible(it, sorted, opts.allowDunnage)
+        });
+        if (!stackPose) {
+          if (!topFallback) topFallback = { item: it, pose: anyPose };
           continue;
         }
         cand = it;
-        candPose = pose;
+        candPose = stackPose;
         break;
       }
-      if (!cand && slopeFallback) {
-        cand = slopeFallback.item;
-        candPose = slopeFallback.pose;
+      if (!cand && topFallback) {
+        cand = topFallback.item;
+        candPose = topFallback.pose;
       }
       if (!cand) {
         var anyPlaceable = sorted.some(function (x) { return x.remaining > 0 && x.placeable; });
@@ -1539,6 +1573,7 @@
       return a.cap >= b.cap ? a : b;
     },
     posesFor: posesFor,
+    poseStackable: poseStackable,
     covers: covers,
     MAX_BOXES: MAX_BOXES,
     overlaps: function (a, b) {
