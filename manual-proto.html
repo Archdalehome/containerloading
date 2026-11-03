@@ -567,8 +567,9 @@ function doPair() {
   // 上件姿态与偏移一律由几何算：findFlipPose 给姿态，pairFit 在高度上搜出"零重叠零缝隙"的那个 z
   const flip = CL.pack.findFlipPose(it, { m: b.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1] });
   if (!flip) { say('这只箱子没有可用的对扣姿态', true); return; }
-  // 现实里的对扣：水平位置与下件完全重合，姿态绕竖直轴 180°，高度取 H低（唯一解）
-  const YAW = [-1, 0, 0, 0, -1, 0, 0, 0, 1];
+  // 倒扣 = 绕宽度轴翻 180°（底面朝上），然后像现实一样"从上面放下去"：
+  // 位置与下件重合，高度交给 settle 落到真实支撑面——能落下就说明物理上成立，落不下就拒绝。
+  const FLIPDOWN = [1, 0, 0, 0, -1, 0, 0, 0, -1];
   const mul3 = (x2, y2) => {
     const o = new Array(9);
     for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
@@ -577,30 +578,16 @@ function doPair() {
     return o;
   };
   const bp = b.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1];
-  const cand = {
-    skuId: b.skuId, x: b.x, y: b.y, z: b.z + sv.hlow,
-    l: b.l, w: b.w, h: b.h, pose: mul3(YAW, bp)
-  };
-  if (!CL.manual.inBounds(cand, c)) { say('对扣放不下：会超出柜内腔或门高', true); return; }
-  for (const o of model.boxes) {
-    if (o.uid === b.uid) continue;
-    const depth = CL.solid.overlapDepth(cand, o, it, itemsById[o.skuId], 10);
-    if (depth > 1) { say('对扣放不下：这个位置被别的箱子挡住（重叠 ' + Math.round(depth) + 'mm）', true); return; }
-  }
-  const fit = CL.solid.pairFit(
-    { skuId: b.skuId, x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: bp },
-    cand, it, { step: 10, tol: 1 }
-  );
-  if (!(fit.overlap <= 1 && fit.gap <= 1)) {
-    say('对扣对不齐：最大缝隙 ' + fit.gap.toFixed(1) + 'mm、重叠 ' + fit.overlap.toFixed(1) + 'mm，这个姿态无法严丝合缝', true);
-    return;
-  }
-  cand.uid = model.nextId++;
-  cand.pinned = true;
-  model.boxes.push(cand);
-  selected = cand.uid;
+  const candPose = mul3(FLIPDOWN, bp);
+  // 高度差：倒扣件的底面就是原箱的顶面，所以要按它自己的外框去落
+  const r = CL.manualModel.add(model, {
+    skuId: b.skuId, x: b.x, y: b.y, z: c.innerH,
+    l: b.l, w: b.w, h: b.h, pose: candPose
+  });
+  if (!r.ok) { say('倒扣放不下：' + (r.message || r.reason), true); return; }
+  selected = r.box.uid;
   refreshAll();
-  say('已对扣：紧贴（缝隙 ' + fit.gap.toFixed(1) + 'mm、重叠 ' + fit.overlap.toFixed(1) + 'mm），拼合总高 ' + Math.round(sv.hlow + sv.hhigh) + 'mm');
+  say('已倒扣并落下：上件底面落在 z=' + Math.round(r.box.z) + '（由下方支撑面决定）');
   if (!CL.manual.inBounds(cand, c)) { say('对扣放不下：会超出柜内腔或门高', true); return; }
   const others = model.boxes.filter((x) => x.uid !== b.uid);
   for (const o of others) {
