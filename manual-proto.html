@@ -353,13 +353,23 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   mesh.material = matFor(start.skuId);
   // 落位用拖动中已经算好的吸附位置（没有就现场再算一次），再交给 tryPlace 做沉降与判定
   const base = snappedBox || Object.assign({}, start, containerXY(mesh, start));
-  const res = CL.manual.tryPlace(
-    { skuId: start.skuId, x: base.x, y: base.y, z: c.innerH, l: start.l, w: start.w, h: start.h, pose: start.pose },
-    model.boxes.filter((b) => b.uid !== uid), c, itemsById, { tol: SNAP_TOL }
-  );
+  const input = { skuId: start.skuId, x: base.x, y: base.y, z: c.innerH, l: start.l, w: start.w, h: start.h, pose: start.pose };
+  const others = model.boxes.filter((b) => b.uid !== uid);
+  // 拖动过程中已经吸附好了，松手时 **不再** 二次吸附：再吸一次会把它挪开几毫米，
+  // 正好破坏“完整托住底面”，于是叠箱被误判成放不下并弹回。
+  let res = CL.manual.tryPlace(input, others, c, itemsById, { tol: 0 });
+  if (!res.ok && (res.reason === 'no-support' || res.reason === 'overlap')) {
+    res = CL.manual.tryPlace(input, others, c, itemsById, { tol: SNAP_TOL });
+  }
   if (!res.ok) {
     syncMesh(start);                     // 先回弹到原位，再报原因
-    say(res.reason === 'bounds' ? '放不下：' + res.message : '放不下：' + res.message, true);
+    if (res.reason === 'no-support') {
+      const sup = supportRectUnder(others, start.h, base.x, base.y, start.l, start.w);
+      const supTxt = sup ? Math.round(sup.rect.l) + '×' + Math.round(sup.rect.w) : '没有';
+      say('放不下：下方支撑面 ' + supTxt + 'mm，托不住 ' + Math.round(start.l) + '×' + Math.round(start.w) + 'mm 的底面（要完整托住才能叠）', true);
+    } else {
+      say('放不下：' + res.message, true);
+    }
     return;
   }
   model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign(res.box, { uid }) : b));
