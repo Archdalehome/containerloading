@@ -632,6 +632,25 @@ input[type=number]::-webkit-inner-spin-button { margin-left: 2px; }
   line-height: 1.7;
 }
 
+/* 空场景提示：3D 里没箱子时不能说一片空白 */
+.viewer-empty {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  max-width: 420px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  color: var(--ink2);
+  font-size: 12.5px;
+  line-height: 1.75;
+  text-align: center;
+  pointer-events: none;
+}
+.viewer-empty b { color: var(--ink); }
+
 .dim-label {
   position: absolute;
   left: 0;

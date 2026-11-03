@@ -133,6 +133,20 @@
 
     var html = '';
 
+    // 空结果也要有话说：0 箱、方案全不合法、没有可得结论，都不能只留一片空白
+    if (pack.planSet && pack.planSet.ranked && pack.planSet.ranked.length === 0) {
+      var firstErr = pack.planSet.plans[0] && pack.planSet.plans[0].errors && pack.planSet.plans[0].errors[0];
+      html += '<div class="warn-box"><p class="warn-title">' + pack.planSet.plans.length +
+        ' 个方案全部未通过物理校验</p>' +
+        '<p class="extra-line">这不该发生——说明排布或校验有 bug。请把这单参数发我，第一个错误：' +
+        esc(firstErr ? firstErr.message : '未知错误') + '</p></div>';
+    }
+    if (t.loadedCount === 0) {
+      html += '<div class="warn-box"><p class="warn-title">这单一个箱子都没装进去</p>' +
+        '<p class="extra-line">停止原因：' + esc(pack.stop ? pack.stop.message : '未说明') +
+        '。逐行的叠放诊断和说明在下面两张表里。</p></div>';
+    }
+
     // 方案对比条：全部方案的箱数都列出来，前 3 名可切 3D
     if (pack.planSet) {
       var ps = pack.planSet;
@@ -249,6 +263,14 @@
           html += '<p class="extra-line">另有 <b>' + extra.impossibleCount + ' 箱</b>（' +
             extra.impossibleNames.map(esc).join('、') + '）超过门高或底面超尺寸，换同规格柜也装不进，需要改箱型或换柜型。</p>';
         }
+        // 补柜算出 0 个但还有剩余：不能只留一句「还需 0 个」，得说清为什么开新柜也没用
+        if (extra.count === 0 && extra.impossibleCount === 0) {
+          html += '<p class="extra-line">按同规格柜再算，<b>剩余 ' + t.remainingCount +
+            ' 箱一个新柜也装不进</b>——尺寸和重量都过得了门槛，但在这个柜型里排不下（原因见上）。' +
+            '换更大的柜型、或把这类箱子拆小后再试。</p>';
+        }
+      } else if (t.remainingCount > 0) {
+        html += '<p class="extra-line">剩余 ' + t.remainingCount + ' 箱没有做补柜估算（缺少柜型参数），换柜前请先确认集装箱规格。</p>';
       }
       html += '</div>';
     }

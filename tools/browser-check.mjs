@@ -319,6 +319,18 @@ function pageTestScript() {
 
   // 9. 3D 图
   await wait(400);
+
+  // 空场景也要有话说：直接交给 viewer 一个空 pack，看它是不是给原因
+  const emptyTip = (() => {
+    const c = window.CL.containers.get('40HQ');
+    window.CL3D.build({ container: c, items: [], placements: [], layers: [], dunnage: [], totals: {} });
+    const el = document.querySelector('#viewer-canvas .viewer-empty');
+    return { has: !!el, text: (el ? el.textContent : '').replace(/\s+/g, ' ').slice(0, 80) };
+  })();
+  step('3D 空场景给出原因（不留白）', emptyTip.has && emptyTip.text.includes('没有装进任何箱子'), emptyTip.text);
+  await calc();
+  await wait(300);
+
   const gl = $('#viewer-canvas canvas');
   step('3D 画布已创建', !!gl && gl.width > 0 && gl.height > 0, gl ? gl.width + '×' + gl.height : '无 canvas');
   step('3D 卡片可见', !$('#viewer-card').classList.contains('hidden'));
@@ -365,6 +377,9 @@ function pageTestScript() {
   // 状态区分：装不下 → 停因行；全部装入 → 「全部…已装入」+ 还能再放 N 箱。两者互斥
   const partialBody = $('#result-body').textContent;
   step('装不下时不出现「全部装入」文案', !partialBody.includes('货量上限，非算法限制'), '当前是部分装载');
+  // 反向：正常结果里不能出现「全不合法」「一箱没装」这两类兜底提示（说明它们只在真异常时出现）
+  step('正常结果不出现「全部未通过物理校验」', !partialBody.includes('全部未通过物理校验'), 'ok');
+  step('正常结果不出现「一个箱子都没装进去」', !partialBody.includes('一个箱子都没装进去'), 'ok');
   setVal($('.qty-input', cards()[0]), '100');
   await calc();
   await wait(250);

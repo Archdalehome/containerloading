@@ -31,6 +31,7 @@ const S = {
   meshes: [],
   lines: [],
   dunnageMeshes: [],
+  emptyTip: null,
   dimLabels: {},
   cam: { theta: 0.62, phi: 1.05, radius: 10000, target: new THREE.Vector3() },
   dirty: true,
@@ -362,6 +363,7 @@ function clearScene() {
   S.meshes = [];
   S.lines = [];
   S.dunnageMeshes = [];
+  if (S.emptyTip) { S.emptyTip.remove(); S.emptyTip = null; }
   Object.keys(S.dimLabels).forEach((k) => S.dimLabels[k].remove());
   S.dimLabels = {};
   S.layer = 0;
@@ -555,6 +557,16 @@ function build(pack) {
   S.root.add(buildContainer(pack));
   buildInstanced(pack);
   buildDunnage(pack);
+
+  // 空场景也要说一句话，别让用户对着一个空柜子猜
+  if (S.meshes.length === 0) {
+    const why = (pack.stop && pack.stop.message) ? pack.stop.message : '没有箱子被排进这个柜子';
+    S.emptyTip = document.createElement('div');
+    S.emptyTip.className = 'viewer-empty';
+    S.emptyTip.innerHTML = '<b>这单没有装进任何箱子</b><br>' + why +
+      '<br><span class="muted">原因和空间拆分见结果页「为什么停」</span>';
+    S.host.appendChild(S.emptyTip);
+  }
 
   S.dimLabels.len = makeLabel('内长 ' + Math.round(c.innerL) + ' mm', 'dim-l');
   S.dimLabels.width = makeLabel('内宽 ' + Math.round(c.innerW) + ' mm', 'dim-w');
