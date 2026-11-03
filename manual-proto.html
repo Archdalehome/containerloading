@@ -10,6 +10,29 @@
   #status { position: fixed; left: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82); padding: 8px 14px; border-radius: 10px; min-width: 260px; }
   #status.bad { background: rgba(127,29,29,.9); }
   canvas { display: block; }
+  /* 左栏：箱型列表与新建表单 */
+  #side { position: fixed; left: 16px; top: 132px; z-index: 3; width: 290px; max-height: calc(100vh - 210px); overflow: auto;
+          background: rgba(15,23,42,.9); border: 1px solid #1e293b; border-radius: 10px; padding: 10px 12px; }
+  #side h3 { margin: 0 0 8px; font-size: 13px; color: #7dd3fc; font-weight: 600; }
+  .btn { background: #1e3a8a; color: #e2e8f0; border: 1px solid #2563eb; border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  .btn:hover { background: #1d4ed8; }
+  .btn.ghost { background: transparent; border-color: #334155; }
+  .sku { border: 1px solid #1e293b; border-radius: 8px; padding: 7px 9px; margin-bottom: 7px; cursor: pointer; }
+  .sku.on { border-color: #f59e0b; background: rgba(245,158,11,.08); }
+  .sku .nm { font-size: 13px; color: #e2e8f0; }
+  .sku .meta { font-size: 12px; color: #94a3b8; }
+  .sku .row2 { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+  .sku .cnt { margin-left: auto; font-size: 12px; color: #7dd3fc; }
+  #empty { color: #94a3b8; font-size: 12px; line-height: 1.7; margin: 6px 0 10px; }
+  #form { display: none; border-top: 1px dashed #334155; margin-top: 8px; padding-top: 8px; }
+  #form.on { display: block; }
+  #form .fld { display: flex; gap: 6px; margin-bottom: 6px; }
+  #form label { font-size: 12px; color: #94a3b8; width: 84px; flex: none; line-height: 26px; }
+  #form input, #form select { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 5px; padding: 3px 6px; width: 100%; font: inherit; }
+  #form .err { color: #fca5a5; font-size: 12px; min-height: 16px; }
+  #shapes { display: flex; gap: 6px; margin-bottom: 6px; }
+  #shapes button { flex: 1; background: #0f172a; color: #cbd5e1; border: 1px solid #334155; border-radius: 5px; padding: 4px 0; cursor: pointer; font: inherit; }
+  #shapes button.on { border-color: #38bdf8; color: #38bdf8; }
 </style>
 </head>
 <body>
@@ -27,6 +50,26 @@
     <span style="color:#94a3b8">（键：1/2/3 旋转 · Ctrl+C/V 复制 · Ctrl+Z 撤销）</span>
   </div>
   <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
+</div>
+<div id="side">
+  <h3>纸箱清单</h3>
+  <div id="empty">还没有箱型。点下面「＋ 新建箱型」加一个，再点列表里的 <b>＋</b> 就往柜里放一只。</div>
+  <div id="sku-list"></div>
+  <button class="btn" id="new-sku" style="width:100%">＋ 新建箱型</button>
+  <div id="form">
+    <div id="shapes">
+      <button type="button" data-shape="rect">矩形箱</button>
+      <button type="button" data-shape="lshape">L 形箱</button>
+      <button type="button" data-shape="slope">斜顶箱</button>
+    </div>
+    <div id="fields"></div>
+    <div class="fld"><label>数量</label><input id="f-qty" value="10" inputmode="numeric"></div>
+    <div class="err" id="f-err"></div>
+    <div class="fld" style="gap:8px">
+      <button class="btn" id="f-save" style="flex:1">保存</button>
+      <button class="btn ghost" id="f-cancel" style="flex:1">取消</button>
+    </div>
+  </div>
 </div>
 <div id="status">状态：待拖动</div>
 <div id="stat2" style="position:fixed;right:16px;top:14px;z-index:2;background:rgba(15,23,42,.82);padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.7"></div>
@@ -53,6 +96,7 @@
 <script src="js/core/manual-model.js"></script>
 <script type="module">
 import * as THREE from './vendor/three.module.min.js';
+import { geometryFor, poseMatrix3, matrix4FromR3 } from './js/ui/box-geometry.js';
 
 // 柜型切换：换柜型直接带参数重载，线框 / 相机取景 / 射线平面 / 标注一起重建，
 // 不留半新半旧的场景状态。柜型确定 = 尺寸确定，本来就该整场重建。
@@ -124,20 +168,29 @@ function rebuildScene() {
 }
 rebuildScene();
 
-// 两只箱子（手动模型里的数据才是真的，这里只是渲染）
-const items = [
-  { id: 'a', shape: 'rect', name: '箱A', qty: 99, bbox: { l: 400, w: 300, h: 300 }, shapeValues: { l: 400, w: 300, h: 300 } }
-];
-const model = CL.manualModel.create(items, c);
-const itemsById = { a: items[0] };
+// 模型从空箱型开始，箱型一律由左栏新建；这里的网格只是模型的投影
+const model = CL.manualModel.create([], c);
+const itemsById = model.itemsById;
 
-const geo = new THREE.BoxGeometry(400, 300, 300);
+// 三种箱型的几何共用 js/ui/box-geometry.js，和正式页同一份代码
+const geoCache = new Map();
+function geoFor(skuId, pose) {
+  const key = skuId + '|' + (pose ? pose.join(',') : '');
+  if (!geoCache.has(key)) {
+    const it = itemsById[skuId];
+    const g = geometryFor(it);
+    if (pose) g.applyMatrix4(matrix4FromR3(poseMatrix3(pose)));
+    geoCache.set(key, g);
+  }
+  return geoCache.get(key);
+}
 const mat = new THREE.MeshLambertMaterial({ color: 0x2563eb, transparent: true, opacity: 0.92 });
 const ghostMat = new THREE.MeshLambertMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.55 });
 scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.1));
 
 function meshFor(b) {
-  const m = new THREE.Mesh(geo, mat);
+  const m = new THREE.Mesh(geoFor(b.skuId, b.pose), mat);
+
   m.userData.uid = b.uid;
   m.position.copy(toScene(b.x + b.l / 2, b.z + b.h / 2, b.y + b.w / 2));
   return m;
@@ -255,18 +308,27 @@ window.__PROTO = {
     return { ok: res.ok, reason: res.reason, box: res.box, boxCount: model.boxes.length };
   }
 };
-// 初始给一只箱子，打开就能拖
-window.__PROTO.drop('a', 0, 0, 0);
+// 自检全部跑在**临时模型**上，不污染用户正在摆的柜子
+function tmpModel() {
+  const tmp = CL.manualModel.create([], c);
+  const it = toItem('t1', 'rect', '自检箱', { L: '400', W: '300', H: '300' }, 99);
+  tmp.items.push(it);
+  tmp.itemsById[it.id] = it;
+  return tmp;
+}
 
 // 两条验收自检：撞墙必须拒绝并给原因；落在箱顶高度必须等于 300
 window.__PROTO.selfTest = function () {
   const out = {};
-  const before = model.boxes.length;
-  const wall = window.__PROTO.drop('a', 0, c.innerW - 100, 0);
+  const tmp = tmpModel();
+  const base = { skuId: 't1', x: 0, y: 0, z: 0, l: 400, w: 300, h: 300 };
+  const first = CL.manual.tryPlace(base, tmp.boxes, c, tmp.itemsById);
+  if (first.ok) tmp.boxes.push(first.box);
+  const wall = CL.manual.tryPlace({ skuId: 't1', x: 0, y: c.innerW - 100, z: 0, l: 400, w: 300, h: 300 }, tmp.boxes, c, tmp.itemsById);
   out.wallRejected = wall.ok === false && wall.reason === 'bounds';
   out.wallReason = wall.reason || 'ok';
-  out.modelUnchanged = model.boxes.length === before;
-  const top = window.__PROTO.drop('a', 0, 0, 2000);
+  out.modelUnchanged = tmp.boxes.length === 1;
+  const top = CL.manual.tryPlace({ skuId: 't1', x: 0, y: 0, z: 2000, l: 400, w: 300, h: 300 }, tmp.boxes, c, tmp.itemsById);
   out.onTopOk = !!top.ok;
   out.onTopZ = top.ok ? Math.round(top.box.z) : null;
   return out;
@@ -292,6 +354,7 @@ function refreshAll() {
   model.boxes.forEach((b) => syncMesh(b));
   paintSelection();
   paintCount();
+  renderSkuList();
 }
 
 /** 切柜型后重新校验：越界或过不了门高的标红，箱子不删 */
@@ -378,18 +441,158 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
 
 window.__PROTO.selfTest2 = () => {
   const out = {};
-  selected = model.boxes[0].uid;
-  const before = model.boxes.length;
-  doCopy(); doCopy();
-  out.copyGrew = model.boxes.length === before + 2;
-  out.countMatches = CL.manualModel.counts(model)[0].placed === model.boxes.length;
-  const h0 = model.boxes.find((b) => b.uid === selected).h;
-  doRotate('y');
-  out.rotated = model.boxes.find((b) => b.uid === selected).h !== h0;
-  doUndo(); doUndo(); doUndo();
-  out.undoBack = model.boxes.length === before;
+  const tmp = tmpModel();
+  const a = CL.manualModel.add(tmp, { skuId: 't1', x: 0, y: 0, z: 0, l: 400, w: 300, h: 300 });
+  if (!a.ok) return out;
+  const uid = a.box.uid;
+  const before = tmp.boxes.length;
+  const c1 = CL.manualModel.copy(tmp, uid);
+  const c2 = CL.manualModel.copy(tmp, uid);
+  out.copyGrew = c1.ok && c2.ok && tmp.boxes.length === before + 2;
+  out.countMatches = CL.manualModel.counts(tmp)[0].placed === tmp.boxes.length;
+  const h0 = tmp.boxes.find((b) => b.uid === uid).h;
+  CL.manualModel.rotate(tmp, uid, 'y');
+  out.rotated = tmp.boxes.find((b) => b.uid === uid).h !== h0;
+  CL.manualModel.undo(tmp); CL.manualModel.undo(tmp); CL.manualModel.undo(tmp);
+  out.undoBack = tmp.boxes.length === before;
   return out;
 };
+
+// ---- 左栏：箱型列表 / 新建 / 往柜里加一只 ----
+let currentSku = null;
+let formShape = 'rect';
+
+function toItem(id, shapeKey, name, values, qty) {
+  const shape = CL.shapes.get(shapeKey);
+  const v = {};
+  shape.fields.forEach((f) => {
+    v[f.key] = String(values && values[f.key] !== undefined && values[f.key] !== '' ? values[f.key] : shape.defaults[f.key]);
+  });
+  const bb = shape.bbox(v);
+  const n = CL.shapes.toNum;
+  const sv = shapeKey === 'lshape'
+    ? { l: n(v.L), w: n(v.W), h: bb.h, wlow: n(v.Wlow), whigh: n(v.Whigh), hlow: n(v.Hlow), hhigh: n(v.Hhigh) }
+    : shapeKey === 'slope'
+      ? { l: n(v.L), w: n(v.W), h: bb.h, hlow: n(v.Hlow), hhigh: n(v.Hhigh) }
+      : { l: n(v.L), w: n(v.W), h: bb.h };
+  return {
+    id, index: model.items.length, shape: shapeKey, shapeName: shape.name,
+    name: name || shape.name, values: v, rawValues: v, bbox: bb, shapeValues: sv,
+    qty: Math.max(0, Number(qty) || 0), allowFlip: true, allowSide: true
+  };
+}
+
+function addSku(spec) {
+  const shape = CL.shapes.get(spec.shape);
+  const errs = shape.checks(spec.values || {});
+  if (errs && errs.length) return { ok: false, message: errs[0] };
+  const id = spec.id || ('s' + (model.items.length + 1) + '-' + Math.random().toString(36).slice(2, 6));
+  const it = toItem(id, spec.shape, spec.name, spec.values, spec.qty);
+  model.items.push(it);
+  model.itemsById[it.id] = it;
+  renderSkuList();
+  return { ok: true, item: it };
+}
+
+function summarise(it) {
+  const b = it.bbox;
+  let s = Math.round(b.l) + '×' + Math.round(b.w) + '×' + Math.round(b.h);
+  if (it.shape === 'lshape') s = Math.round(b.l) + '×' + Math.round(b.w) + ' · 台阶 ' + Math.round(it.shapeValues.wlow) + '/' + Math.round(it.shapeValues.whigh);
+  if (it.shape === 'slope') s = Math.round(b.l) + '×' + Math.round(b.w) + ' · 斜顶 ' + Math.round(it.shapeValues.hlow) + '/' + Math.round(b.h);
+  return s;
+}
+
+function renderSkuList() {
+  const list = document.getElementById('sku-list');
+  const empty = document.getElementById('empty');
+  const cs = CL.manualModel.counts(model);
+  empty.style.display = cs.length ? 'none' : 'block';
+  list.innerHTML = '';
+  cs.forEach((x) => {
+    const it = itemsById[x.skuId];
+    if (!it) return;
+    const row = document.createElement('div');
+    row.className = 'sku' + (currentSku === it.id ? ' on' : '');
+    row.innerHTML =
+      '<div class="nm"></div><div class="meta"></div>' +
+      '<div class="row2"><button class="btn" data-add="1">＋</button>' +
+      '<button class="btn ghost" data-pick="1">选中</button><span class="cnt"></span></div>';
+    row.querySelector('.nm').textContent = it.name;
+    row.querySelector('.meta').textContent = summarise(it);
+    row.querySelector('.cnt').textContent = x.placed + '/' + x.want;
+    row.querySelector('[data-add]').addEventListener('click', (ev) => { ev.stopPropagation(); addOne(it.id); });
+    row.addEventListener('click', () => { currentSku = it.id; renderSkuList(); });
+    list.appendChild(row);
+  });
+}
+
+/** 往柜里加一只：先过门高，再由模型做沉降/吸附/判定 */
+function addOne(skuId) {
+  const it = itemsById[skuId];
+  if (!it) return;
+  if (it.bbox.h > c.doorH + 0.5) {
+    say('放不进：箱高 ' + Math.round(it.bbox.h) + 'mm 超过 ' + ctnSel.value + ' 门高 ' + c.doorH + 'mm', true);
+    return;
+  }
+  const r = CL.manualModel.add(model, { skuId, x: 0, y: 0, z: 0, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h });
+  if (!r.ok) { say('放不进：' + (r.message || r.reason), true); return; }
+  selected = r.box.uid;
+  currentSku = it.id;
+  refreshAll();
+  say('已放入一只 ' + it.name + '，共 ' + model.boxes.length + ' 只');
+}
+
+function paintForm() {
+  const shape = CL.shapes.get(formShape);
+  document.querySelectorAll('#shapes button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.shape === formShape);
+  });
+  const box = document.getElementById('fields');
+  box.innerHTML = '';
+  shape.fields.forEach((f) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'fld';
+    const lb = document.createElement('label');
+    lb.textContent = f.label;
+    const inp = document.createElement('input');
+    inp.dataset.key = f.key;
+    inp.value = shape.defaults[f.key];
+    inp.setAttribute('inputmode', 'numeric');
+    wrap.appendChild(lb); wrap.appendChild(inp);
+    box.appendChild(wrap);
+  });
+}
+
+document.getElementById('new-sku').addEventListener('click', () => {
+  const f = document.getElementById('form');
+  const on = f.classList.toggle('on');
+  if (on) { document.getElementById('f-err').textContent = ''; paintForm(); }
+});
+document.querySelectorAll('#shapes button').forEach((b) => {
+  b.addEventListener('click', () => { formShape = b.dataset.shape; paintForm(); });
+});
+document.getElementById('f-cancel').addEventListener('click', () => {
+  document.getElementById('form').classList.remove('on');
+});
+document.getElementById('f-save').addEventListener('click', () => {
+  const shape = CL.shapes.get(formShape);
+  const values = {};
+  document.querySelectorAll('#fields input').forEach((i) => { values[i.dataset.key] = i.value.trim(); });
+  const qty = document.getElementById('f-qty').value.trim();
+  const errEl = document.getElementById('f-err');
+  const errs = shape.checks(values);
+  if (errs && errs.length) { errEl.textContent = errs[0]; return; }
+  if (!(Number(qty) > 0)) { errEl.textContent = '数量要大于 0'; return; }
+  const nameInput = shape.name;
+  const r = addSku({ shape: formShape, values, qty, name: nameInput });
+  if (!r.ok) { errEl.textContent = r.message || '保存失败'; return; }
+  errEl.textContent = '';
+  document.getElementById('form').classList.remove('on');
+  currentSku = r.item.id;
+  renderSkuList();
+  say('已新建箱型：' + r.item.name + ' ' + summarise(r.item));
+});
+renderSkuList();
 
 // 把诊断数与两条验收写进页面，截图就能读到
 setTimeout(() => {

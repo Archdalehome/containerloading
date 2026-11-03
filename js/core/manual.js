@@ -120,6 +120,13 @@
         box.x + box.l > c.innerL + EPS || box.y + box.w > c.innerW + EPS) {
       return { ok: false, reason: 'bounds', message: '超出柜内腔（水平方向）', box: box };
     }
+    // 竖直硬约束先查：门高过不去的箱子，先说门高，别绕成「无支撑」
+    if (box.h > c.doorH + EPS) {
+      return { ok: false, reason: 'door-height', message: '箱高 ' + Math.round(box.h) + 'mm 超过柜门 ' + c.doorH + 'mm', box: box };
+    }
+    if (box.h > c.innerH + EPS) {
+      return { ok: false, reason: 'too-tall', message: '箱高 ' + Math.round(box.h) + 'mm 超过柜内高 ' + c.innerH + 'mm', box: box };
+    }
     var st = settle(box, placed, c, itemsById);
     box.z = st.z;
     if (!st.ok) {
