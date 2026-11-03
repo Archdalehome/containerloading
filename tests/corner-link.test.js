@@ -107,5 +107,46 @@ test('不合法时不动原坐标（link 不就地改入参）', () => {
   assert.deepStrictEqual(b, before);
 });
 
+console.log('\n松手自动对齐（alignOnDrop）');
+
+test('拖到箱角附近松手：自动把底角对到顶角上，残差 0/0/0', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const a = box('a', 0, 0, 0, 400, 300, 300, 'A1');
+  // 落在 (7, -9, 300) 附近，离 A 的顶角 (0,0,300) 约 11mm
+  const b = box('a', 7, -9, 300, 400, 300, 300, 'B1');
+  const r = L.alignOnDrop(b, [a], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.deepStrictEqual([r.box.x, r.box.y, r.box.z], [0, 0, 300]);
+  assert.deepStrictEqual(r.residual, { dx: 0, dy: 0, dz: 0 });
+  assert.strictEqual(r.alignedWith, 'A1');
+});
+
+test('拖到远处松手：不做对齐，交给普通落位', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const a = box('a', 0, 0, 0, 400, 300, 300, 'A1');
+  const b = box('a', 3000, 2000, 0, 400, 300, 300, 'B1');
+  const r = L.alignOnDrop(b, [a], c, items, { tol: 150 });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'no-align');
+});
+
+test('贴柜角松手：对到柜底角上', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const b = box('a', 23, 11, 0, 400, 300, 300, 'B1');
+  const r = L.alignOnDrop(b, [], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.deepStrictEqual([r.box.x, r.box.y, r.box.z], [0, 0, 0]);
+  assert.strictEqual(r.alignedWith, 'floor');
+});
+
+test('会被压进去的对齐不采纳（重叠时一并不动）', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const a = box('a', 0, 0, 0, 400, 300, 300, 'A1');
+  // 与 A 底角几乎重合 → 对齐后会整只塞进 A 里，必须放弃
+  const b = box('a', 9, 6, 0, 400, 300, 300, 'B1');
+  const r = L.alignOnDrop(b, [a], c, items, { tol: 150 });
+  assert.strictEqual(r.ok, false, '不该采纳会重叠的对齐，实际 ' + JSON.stringify(r.box || null));
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败\n');
 if (fail) process.exit(1);

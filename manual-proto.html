@@ -400,7 +400,7 @@ function placeGhost(ev) {
 }
 
 renderer.domElement.addEventListener('pointermove', (ev) => {
-  if (dragging) { placeGhost(ev); return; }
+  if (dragging) { dragging.moved = true; placeGhost(ev); return; }
   // 悬停：对角模式下靠它决定"从哪只箱子上取目标角"
   lastPointer = { x: ev.clientX, y: ev.clientY };
   setPointer(ev);
@@ -419,12 +419,29 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   if (!dragging) return;
   const { uid, mesh, start } = dragging;
   const snappedBox = dragging.snapped;
+  const intendedZ = dragging.targetZ;      // 拖动中算好的落点高度，清空 dragging 之前先留住
+  const moved = dragging.moved === true;   // 只是点一下（没拖动）就别动它
   dragging = null;
   mesh.material = matFor(start.skuId);
   // 落位用拖动中已经算好的吸附位置（没有就现场再算一次），再交给 tryPlace 做沉降与判定
   const base = snappedBox || Object.assign({}, start, containerXY(mesh, start));
   const input = { skuId: start.skuId, x: base.x, y: base.y, z: c.innerH, l: start.l, w: start.w, h: start.h, pose: start.pose };
   const others = model.boxes.filter((b) => b.uid !== uid);
+  // 先试「自动对齐某个角」：落点附近 150mm 内有别的箱子（或柜角）的角，就把两个角精确对上。
+  // 这一步是松手的最后一道动作，对齐后仍然要过重叠/支撑/越界校验，过不了就退回普通落位。
+  const dropZ = (intendedZ !== undefined) ? intendedZ : start.z;
+  const al = moved
+    ? CL.cornerLink.alignOnDrop(Object.assign({}, input, { z: dropZ, uid: uid }), others, c, itemsById, { tol: 150 })
+    : { ok: false };
+  if (al.ok) {
+    model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign(al.box, { uid }) : b));
+    refreshAll();
+    say('已自动对齐角点：#' + uid + ' 的' + (al.movingKey === 'floor' ? '底角' : '底角') +
+      ' 与 ' + (al.alignedWith === 'floor' ? '柜底角' : '#' + al.alignedWith + ' 的角') +
+      ' 重合，残差 ' + al.residual.dx + ' / ' + al.residual.dy + ' / ' + al.residual.dz +
+      ' mm（应为 0/0/0），z=' + Math.round(al.box.z));
+    return;
+  }
   // 拖动过程中已经吸附好了，松手时 **不再** 二次吸附：再吸一次会把它挪开几毫米，
   // 正好破坏“完整托住底面”，于是叠箱被误判成放不下并弹回。
   let res = CL.manual.tryPlace(input, others, c, itemsById, { tol: 0 });

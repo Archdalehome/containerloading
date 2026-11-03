@@ -143,10 +143,54 @@
     };
   }
 
+  /**
+   * 松手时自动对齐某个角：在 tol 范围内找最近的一对"本箱底角 ↔ 别箱角（或柜角）"，
+   * 把两个点精确重合，再用 link() 过一遍重叠/支撑/越界。
+   * 找不到、或对齐后过不了校验，就返回 ok:false，调用方退回普通落位。
+   */
+  function alignOnDrop(box, placed, c, itemsById, opts) {
+    var tol = (opts && opts.tol !== undefined) ? opts.tol : 150;
+    var item = itemsById && itemsById[box.skuId];
+    var mine = cornersOf(box, item).filter(function (q) { return q.isBottom; });
+    var targets = [];
+    (placed || []).forEach(function (o) {
+      if (o.uid === box.uid) return;
+      cornersOf(o, itemsById && itemsById[o.skuId]).forEach(function (q) {
+        targets.push({ box: o, q: q });
+      });
+    });
+    // 柜底四角也算目标：贴柜角是最常见的对齐
+    [[0, 0], [c.innerL, 0], [0, c.innerW], [c.innerL, c.innerW]].forEach(function (p) {
+      targets.push({ floor: true, q: { key: 'floor', x: p[0], y: p[1], z: 0 } });
+    });
+    var pairs = [];
+    mine.forEach(function (m) {
+      targets.forEach(function (t) {
+        var d = Math.sqrt(Math.pow(t.q.x - m.x, 2) + Math.pow(t.q.y - m.y, 2) + Math.pow(t.q.z - m.z, 2));
+        if (d <= tol) pairs.push({ m: m, t: t, d: d });
+      });
+    });
+    pairs.sort(function (a, b) { return a.d - b.d; });
+    for (var i = 0; i < pairs.length; i++) {
+      var pr = pairs[i];
+      var tgt = pr.t.box || { x: 0, y: 0, z: 0, uid: '__floor' };
+      var r = link(box, pr.m, tgt, pr.t.q, placed, c, itemsById);
+      if (!r.ok) continue;
+      return Object.assign({}, r, {
+        alignedWith: pr.t.floor ? 'floor' : pr.t.box.uid,
+        movingKey: pr.m.key,
+        targetKey: pr.t.q.key,
+        dist: Math.round(pr.d * 10) / 10
+      });
+    }
+    return { ok: false, reason: 'no-align', message: '附近 ' + tol + 'mm 内没有可对齐的角' };
+  }
+
   NS.cornerLink = {
     cornersOf: cornersOf,
     contactAt: contactAt,
-    link: link
+    link: link,
+    alignOnDrop: alignOnDrop
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = NS.cornerLink;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
