@@ -268,7 +268,7 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   dragOffset = new THREE.Vector3(
     hits[0].object.position.x - hitPoint.x, 0, hits[0].object.position.z - hitPoint.z
   );
-  dragging = { uid, mesh: hits[0].object, start: b, planeY };
+  dragging = { uid, mesh: hits[0].object, start: b, planeY, downX: ev.clientX, downY: ev.clientY };
   hits[0].object.material = ghostMat;
   renderer.domElement.setPointerCapture(ev.pointerId);
   say('拖动中…松手会落到下方最高的支撑面上');
@@ -401,7 +401,16 @@ function placeGhost(ev) {
 }
 
 renderer.domElement.addEventListener('pointermove', (ev) => {
-  if (dragging) { dragging.moved = true; placeGhost(ev); return; }
+  if (dragging) {
+    // 拖动阈值：手指/鼠标抖几个像素不算拖动，否则"点一下选中"会顺手把箱子挪位
+    if (!dragging.moved) {
+      const d = Math.hypot(ev.clientX - dragging.downX, ev.clientY - dragging.downY);
+      if (d < 4) return;
+    }
+    dragging.moved = true;
+    placeGhost(ev);
+    return;
+  }
 });
 
 renderer.domElement.addEventListener('pointerup', (ev) => {
@@ -430,7 +439,13 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
     return;
   }
   const info = pv.info || {};
-  model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign({}, pv.box, { uid }) : b));
+  // 普通落位：把这只箱子从原来的配对关系里摘出来（它可能本来是扣在别人上面的那只），
+  // 否则 pinned 会让它一直不参与重力结算
+  model.boxes = model.boxes.map((b) => {
+    if (b.uid === uid) return Object.assign({}, pv.box, { uid, pinned: false, pairedWith: undefined });
+    if (start.pairedWith && b.uid === start.pairedWith) return Object.assign({}, b, { paired: false });
+    return b;
+  });
   selected = uid;
   refreshAll();
   say('已落位：' + (info.floor ? '柜底' : '下层箱面 z=' + Math.round(info.supportZ)) +

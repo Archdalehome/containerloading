@@ -103,5 +103,15 @@ test('对扣位被别的箱子占着：不扣（零侵入优先）', () => {
   assert.strictEqual(r.ok, false, '被占住不该硬扣');
 });
 
+test('已对扣的两只：再拖下面那只不会去扣上面那只（不会交换位置）', () => {
+  const it = lshape('l', 900, 700, 350, 350, 300, 600);
+  const items = { l: it };
+  const lower = Object.assign(box('l', 0, 0, 0, 900, 700, 600, 'L1'), { paired: true });
+  const upper = Object.assign(box('l', 0, 0, 300, 900, 700, 600, 'L2'), { pinned: true, pairedWith: 'L1' });
+  const dragged = box('l', 80, 60, 0, 900, 700, 600, 'L1');
+  const r = L.autoPairOnDrop(dragged, [lower, upper], c, items, { tol: 400 });
+  assert.strictEqual(r.ok, false, '不该再配一次对，实际 ok=' + r.ok);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败\n');
 if (fail) process.exit(1);

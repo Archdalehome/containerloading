@@ -378,7 +378,9 @@
       if (o.uid === box.uid) return;
       var oi = itemsById && itemsById[o.skuId];
       if (!sameShape(item, oi)) return;          // 只和同款箱对扣：不同尺寸扣不严
-      if (o.paired) return;                      // 已经配过对的别再叠一层
+      // 已经配过对的两只都不能再当"下件"：
+      // 否则把下面那只拖起来时，它会去扣上面那只，看起来就是两只交换了位置
+      if (o.paired || o.pairedWith || o.pinned) return;
       var t = pairPlacement(o, item);
       if (!t) return;
       var d = Math.sqrt(Math.pow(t.x - box.x, 2) + Math.pow(t.y - box.y, 2));
