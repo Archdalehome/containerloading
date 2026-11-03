@@ -31,7 +31,13 @@ function test(name, fn) {
 const EPS = 1e-6;
 
 function row(id, values, qty, weight, shape, name) {
-  return { id, shape: shape || 'rect', name: name || '', values, qty: String(qty), weight: weight === undefined ? '' : String(weight) };
+  // 测试里默认「只允许底面朝下」，需要姿态的用例显式打开；
+  // 引擎默认值改成"允许"后，这样才不会把历史期望值一起搬走
+  return {
+    id, shape: shape || 'rect', name: name || '', values,
+    qty: String(qty), weight: weight === undefined ? '' : String(weight),
+    allowSide: false, allowFlip: false
+  };
 }
 
 function state(container, rows, allowFill) {

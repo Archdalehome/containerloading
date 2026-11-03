@@ -512,8 +512,11 @@
         unitWeight: Number.isFinite(w) ? w : null,
         netVolumeEach: shape.volume(v),
         bboxVolumeEach: bb.l * bb.w * bb.h,
-        allowFlip: !!row.allowFlip,
-        allowSide: !!row.allowSide,
+        // 姿态默认值只在这里定义一次：行上没写 = 允许（默认不限方向）。
+        // 之前的坑：引擎这次用 !!row.allowSide（undefined → false），UI 用 true，
+        // 同一份输入不加行级标志就会静默少装 8%。
+        allowFlip: row.allowFlip !== false,
+        allowSide: row.allowSide !== false,
         loaded: 0,
         remaining: qty,
         reason: null,
@@ -1444,8 +1447,9 @@
       // 两者取交集。否则没勾「可倒放」的货会被方案枚举翻过来放——现实中「此面向上」的货会装错方向。
       var rows = (state.rows || []).map(function (r) {
         return Object.assign({}, r, {
-          allowFlip: cfg.policy.allowFlip && !!r.allowFlip,
-          allowSide: cfg.policy.allowSide && !!r.allowSide
+          // 策略档 ∩ 用户开关；行上没写开关 = 允许（默认值只在 run() 里定义一次）
+          allowFlip: cfg.policy.allowFlip && r.allowFlip !== false,
+          allowSide: cfg.policy.allowSide && r.allowSide !== false
         });
       });
       var pack = run({

@@ -123,7 +123,7 @@ test('文件名带柜型和日期', () => {
 });
 
 test('补柜信息写进 CSV', () => {
-  const s3 = state([{ id: 'a', shape: 'rect', name: 'A', values: { L: '400', W: '300', H: '300' }, qty: '3400', weight: '10' }]);
+  const s3 = state([{ id: 'a', shape: 'rect', name: 'A', values: { L: '400', W: '300', H: '300' }, qty: '3400', weight: '10', allowSide: false, allowFlip: false }]);
   const p3 = P.run(s3);
   const extra = P.extraContainers(s3, p3);
   const c3 = R.buildCsv(p3, s3, { now: now, extra: extra });

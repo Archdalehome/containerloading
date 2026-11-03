@@ -163,8 +163,8 @@ test('同一输入两次结果完全一致（逐箱位置也一样）', () => {
 });
 
 test('底面超尺寸的箱子：拦下并说明，引擎也不会假装装得进去', () => {
-  // 40HQ 内宽 2352，这只 3000×2500×500 过得了门高、过不了底面
-  const rows = [row('big', { L: '3000', W: '2500', H: '500' }, 2, '30')];
+  // 6000×3000×3000：任何姿态都至少有两个面超过柜内宽 2352，转都转不进去
+  const rows = [row('big', { L: '6000', W: '3000', H: '3000' }, 2, '30')];
   const res = V.all(st(rows));
   assert.strictEqual(res.ok, false, '超宽箱应被校验拦下');
   const errs = messages(res).filter((e) => e.level === 'error');
@@ -176,6 +176,23 @@ test('底面超尺寸的箱子：拦下并说明，引擎也不会假装装得�
   const extra = P.extraContainers(st(rows), pack);
   assert.strictEqual(extra.count, 0, '超宽箱不该算出要开新柜');
   assert.ok(extra.impossibleCount > 0, '应把超宽箱算进「换柜也装不进」');
+});
+
+test('不传姿态标志 == 显式全开（默认值只有一处，不能静默少算）', () => {
+  const mk = (extra) => Object.assign({
+    id: 'a', shape: 'rect', name: '',
+    values: { L: '400', W: '300', H: '300' }, qty: '5000', weight: '8'
+  }, extra || {});
+  [['40HQ', 1820], ['40GP', 1610]].forEach(([key, want]) => {
+    const implicit = P.runPlans({ container: C.get(key), rows: [mk()], options: {} });
+    const explicit = P.runPlans({ container: C.get(key), rows: [mk({ allowSide: true, allowFlip: true })], options: {} });
+    assert.strictEqual(implicit.best.boxes, explicit.best.boxes,
+      key + ' 不传标志 ' + implicit.best.boxes + ' ≠ 显式全开 ' + explicit.best.boxes);
+    assert.strictEqual(implicit.best.boxes, want, key + ' 默认应为 ' + want + ' 箱，实际 ' + implicit.best.boxes);
+  });
+  // 显式关掉仍然生效
+  const off = P.runPlans({ container: C.get('40HQ'), rows: [mk({ allowSide: false, allowFlip: true })], options: {} });
+  assert.ok(off.best.boxes < 1820, '显式关侧放后应少于 1820，实际 ' + off.best.boxes);
 });
 
 console.log('\n' + passed + ' 通过，' + failures.length + ' 失败\n');
