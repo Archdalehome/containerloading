@@ -387,7 +387,7 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
     return;
   }
   model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign(res.box, { uid }) : b));
-  syncMesh(model.boxes.find((b) => b.uid === uid));
+  refreshAll();   // 里面会做重力结算：被拖走后上面悬空的箱子要落下来
   const snapped = res.snaps && res.snaps.length
     ? '，已贴齐 ' + res.snaps.map((s) => s.axis.toUpperCase() + (s.delta > 0 ? '+' : '') + Math.round(s.delta) + 'mm').join(' / ')
     : '';
@@ -468,7 +468,22 @@ function paintSelection() {
   });
 }
 
+/** 重力结算：自下而上让每只箱子重新落到它当下的支撑面上。
+ *  拖走下面那只、删掉一只、转完姿态之后都要跑，否则上面的箱子会悬在空中——违反常识。 */
+function resettleAll() {
+  const sorted = model.boxes.slice().sort((a, b) => a.z - b.z);
+  const done = [];
+  sorted.forEach((b) => {
+    const st = CL.manual.settle(Object.assign({}, b, { z: c.innerH }), done, c, itemsById);
+    if (st.ok) { b.z = st.z; b.invalid = false; }
+    else { b.z = 0; b.invalid = true; }   // 没有任何支撑就掉到地上，标红让人看见
+    done.push(b);
+  });
+}
+
 function refreshAll() {
+  // 先做重力结算：拖走/删掉下面那只之后，上面的箱子必须落下来，不能悬空
+  resettleAll();
   // 模型变了：删掉多余网格，同步剩下的
   const ids = new Set(model.boxes.map((b) => b.uid));
   meshes.forEach((m, uid) => {
