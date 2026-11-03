@@ -15,11 +15,28 @@
 <body>
 <div id="hud">手动装柜原型 · 拖一只箱子：松手会<b>沉降 + 吸附</b>，越界或重叠会<b>回弹</b>并写明原因</div>
 <div id="status">状态：待拖动</div>
+<div id="stat2" style="position:fixed;right:16px;top:14px;z-index:2;background:rgba(15,23,42,.82);padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.7"></div>
+<script>
+  // 错误兜底：页面出任何错都写到状态栏，截图就能看到原因
+  window.__errs = [];
+  function showErr(msg) {
+    window.__errs.push(msg);
+    var el = document.getElementById('status');
+    if (el) { el.textContent = '脚本错误：' + msg; el.className = 'bad'; }
+    var s2 = document.getElementById('stat2');
+    if (s2) s2.textContent = '脚本错误：' + msg;
+  }
+  window.onerror = function (m, src, line, col) { showErr(m + ' @' + (src || '') + ':' + line + ':' + col); };
+  window.addEventListener('unhandledrejection', function (e) {
+    showErr((e.reason && (e.reason.message || e.reason)) || 'unknown rejection');
+  });
+</script>
 <script src="js/core/shapes.js"></script>
 <script src="js/core/containers.js"></script>
 <script src="js/core/solid.js"></script>
 <script src="js/core/pack.js"></script>
 <script src="js/core/manual.js"></script>
+<script src="js/core/manual-model.js"></script>
 <script type="module">
 import * as THREE from './vendor/three.module.min.js';
 
@@ -166,8 +183,16 @@ addEventListener('resize', () => {
 });
 
 // 便于自检：直接把一只箱子喂进去
+const stats = () => ({
+  children: scene.children.length,
+  calls: renderer.info.render.calls,
+  camera: camera.position.toArray().map((v) => Math.round(v)),
+  boxes: model.boxes.length,
+  errs: window.__errs.slice()
+});
 window.__PROTO = {
   model,
+  debug: { renderer, scene, camera, stats },
   drop(skuId, x, y, z) {
     const it = itemsById[skuId];
     const b = { skuId, x, y, z, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h };
@@ -177,11 +202,36 @@ window.__PROTO = {
       model.boxes.push(res.box);
       syncMesh(res.box);
     }
-    return { ok: res.ok, reason: res.reason, box: res.box };
+    return { ok: res.ok, reason: res.reason, box: res.box, boxCount: model.boxes.length };
   }
 };
 // 初始给一只箱子，打开就能拖
 window.__PROTO.drop('a', 0, 0, 0);
+
+// 两条验收自检：撞墙必须拒绝并给原因；落在箱顶高度必须等于 300
+window.__PROTO.selfTest = function () {
+  const out = {};
+  const before = model.boxes.length;
+  const wall = window.__PROTO.drop('a', 0, c.innerW - 100, 0);
+  out.wallRejected = wall.ok === false && wall.reason === 'bounds';
+  out.wallReason = wall.reason || 'ok';
+  out.modelUnchanged = model.boxes.length === before;
+  const top = window.__PROTO.drop('a', 0, 0, 2000);
+  out.onTopOk = !!top.ok;
+  out.onTopZ = top.ok ? Math.round(top.box.z) : null;
+  return out;
+};
+
+// 把三个诊断数直接写进页面，截图就能读到
+setTimeout(() => {
+  const s = stats();
+  const t = window.__PROTO.selfTest();
+  document.getElementById('stat2').textContent =
+    'children=' + s.children + ' · calls=' + s.calls + ' · boxes=' + s.boxes +
+    ' | 撞墙拒绝=' + (t.wallRejected ? '✓' : '✗') + '(' + t.wallReason + ')' +
+    ' 模型未变=' + (t.modelUnchanged ? '✓' : '✗') +
+    ' | 落箱顶=' + (t.onTopOk && t.onTopZ === 300 ? '✓ z=' + t.onTopZ : '✗ z=' + t.onTopZ);
+}, 900);
 </script>
 </body>
 </html>
