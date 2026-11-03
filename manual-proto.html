@@ -19,7 +19,8 @@
   .btn.ghost { background: transparent; border-color: #334155; }
   .sku { border: 1px solid #1e293b; border-radius: 8px; padding: 7px 9px; margin-bottom: 7px; cursor: pointer; }
   .sku.on { border-color: #f59e0b; background: rgba(245,158,11,.08); }
-  .sku .nm { font-size: 13px; color: #e2e8f0; }
+  .sku .nm { font-size: 13px; color: #e2e8f0; display: flex; align-items: center; gap: 6px; }
+  .sku .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
   .sku .meta { font-size: 12px; color: #94a3b8; }
   .sku .row2 { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
   .sku .cnt { margin-left: auto; font-size: 12px; color: #7dd3fc; }
@@ -62,6 +63,7 @@
       <button type="button" data-shape="lshape">L 形箱</button>
       <button type="button" data-shape="slope">斜顶箱</button>
     </div>
+    <div class="fld"><label>名称</label><input id="f-name" placeholder="例如 吧椅 / 茶几"></div>
     <div id="fields"></div>
     <div class="fld"><label>数量</label><input id="f-qty" value="10" inputmode="numeric"></div>
     <div class="err" id="f-err"></div>
@@ -184,12 +186,24 @@ function geoFor(skuId, pose) {
   }
   return geoCache.get(key);
 }
-const mat = new THREE.MeshLambertMaterial({ color: 0x2563eb, transparent: true, opacity: 0.92 });
+const PALETTE = ['#2563eb', '#0d9488', '#d97706', '#7c3aed', '#db2777', '#65a30d', '#0891b2', '#b45309', '#4f46e5', '#be123c'];
+function colorFor(skuId) {
+  const it = itemsById[skuId];
+  const i = it && typeof it.index === 'number' ? it.index : 0;
+  return new THREE.Color(PALETTE[i % PALETTE.length]);
+}
+const skuMats = new Map();
+function matFor(skuId) {
+  if (!skuMats.has(skuId)) skuMats.set(skuId, new THREE.MeshLambertMaterial({ color: colorFor(skuId), transparent: true, opacity: 0.92 }));
+  return skuMats.get(skuId);
+}
 const ghostMat = new THREE.MeshLambertMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.55 });
+const SELECT_MAT = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
+const BAD_MAT = new THREE.MeshLambertMaterial({ color: 0xdc2626 });
 scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.1));
 
 function meshFor(b) {
-  const m = new THREE.Mesh(geoFor(b.skuId, b.pose), mat);
+  const m = new THREE.Mesh(geoFor(b.skuId, b.pose), matFor(b.skuId));
 
   m.userData.uid = b.uid;
   m.position.copy(toScene(b.x + b.l / 2, b.z + b.h / 2, b.y + b.w / 2));
@@ -271,7 +285,7 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   const { uid, mesh, start } = dragging;
   const snappedBox = dragging.snapped;
   dragging = null;
-  mesh.material = mat;
+  mesh.material = matFor(start.skuId);
   // 落位用拖动中已经算好的吸附位置（没有就现场再算一次），再交给 tryPlace 做沉降与判定
   const base = snappedBox || Object.assign({}, start, containerXY(mesh, start));
   const res = CL.manual.tryPlace(
@@ -359,7 +373,9 @@ const BASE_COLOR = 0x2563eb;
 
 function paintSelection() {
   meshes.forEach((m, uid) => {
-    m.material = uid === selected ? new THREE.MeshLambertMaterial({ color: SELECT_COLOR }) : mat;
+    if (uid === selected) { m.material = SELECT_MAT; return; }
+    const b = model.boxes.find((x) => x.uid === uid);
+    m.material = b && b.invalid ? BAD_MAT : matFor(b ? b.skuId : 'x');
   });
 }
 
@@ -386,7 +402,7 @@ function revalidate() {
   paintSelection();
   bad.forEach((b) => {
     const m = meshes.get(b.uid);
-    if (m) m.material = new THREE.MeshLambertMaterial({ color: 0xdc2626 });
+    if (m) m.material = BAD_MAT;
   });
   return bad;
 }
@@ -531,17 +547,73 @@ function renderSkuList() {
     if (!it) return;
     const row = document.createElement('div');
     row.className = 'sku' + (currentSku === it.id ? ' on' : '');
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = '#' + colorFor(it.id).getHexString();
     row.innerHTML =
-      '<div class="nm"></div><div class="meta"></div>' +
+      '<div class="nm"><span class="dot"></span><span class="nmx"></span></div><div class="meta"></div>' +
       '<div class="row2"><button class="btn" data-add="1">＋</button>' +
-      '<button class="btn ghost" data-pick="1">选中</button><span class="cnt"></span></div>';
-    row.querySelector('.nm').textContent = it.name;
+      '<button class="btn ghost" data-edit="1">改</button>' +
+      '<button class="btn ghost" data-del="1">删</button><span class="cnt"></span></div>';
+    row.querySelector('.nmx').textContent = it.name;
     row.querySelector('.meta').textContent = summarise(it);
     row.querySelector('.cnt').textContent = x.placed + '/' + x.want;
     row.querySelector('[data-add]').addEventListener('click', (ev) => { ev.stopPropagation(); addOne(it.id); });
+    row.querySelector('[data-edit]').addEventListener('click', (ev) => { ev.stopPropagation(); openEdit(it.id); });
+    row.querySelector('[data-del]').addEventListener('click', (ev) => { ev.stopPropagation(); removeSku(it.id); });
     row.addEventListener('click', () => { currentSku = it.id; renderSkuList(); });
     list.appendChild(row);
   });
+}
+
+/** 删箱型：连同它已经放进柜里的箱子一起删（否则会留下没有箱型的孤儿箱） */
+function removeSku(skuId) {
+  const it = itemsById[skuId];
+  if (!it) return;
+  const placed = model.boxes.filter((b) => b.skuId === skuId).length;
+  if (placed && !confirm('「' + it.name + '」已经放进柜里 ' + placed + ' 只，删掉这个箱型会一起删掉它们，继续？')) return;
+  model.boxes = model.boxes.filter((b) => b.skuId !== skuId);
+  model.items = model.items.filter((x) => x.id !== skuId);
+  delete model.itemsById[skuId];
+  delete itemsById[skuId];
+  dropGeo(skuId);
+  if (currentSku === skuId) currentSku = null;
+  if (editingSku === skuId) { editingSku = null; document.getElementById('form').classList.remove('on'); }
+  refreshAll();
+  say('已删除箱型：' + it.name + '（同时移除 ' + placed + ' 只已放的箱子）');
+}
+
+/** 改箱型：尺寸/数量/名称都能改；已放进柜的同款箱子按新尺寸重摆，摆不下就标红 */
+function updateSku(id, values, qty, name) {
+  const it = itemsById[id];
+  if (!it) return { ok: false, message: '箱型不存在' };
+  const shape = CL.shapes.get(it.shape);
+  const errs = shape.checks(values);
+  if (errs && errs.length) return { ok: false, message: errs[0] };
+  const fresh = toItem(id, it.shape, name || it.name, values, qty);
+  fresh.index = it.index;
+  Object.assign(it, fresh);
+  dropGeo(id);
+  // 已摆的箱子换成新尺寸：能放下就留，放不下标红（不悄悄删）
+  model.boxes = model.boxes.map((b) => {
+    if (b.skuId !== id) return b;
+    const others = model.boxes.filter((x) => x.uid !== b.uid);
+    const r = CL.manual.tryPlace(
+      { skuId: id, x: b.x, y: b.y, z: b.z, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h },
+      others, c, itemsById
+    );
+    if (r.ok) return Object.assign(r.box, { uid: b.uid });
+    return Object.assign({}, b, { l: it.bbox.l, w: it.bbox.w, h: it.bbox.h, invalid: true });
+  });
+  refreshAll();
+  const bad = model.boxes.filter((b) => b.skuId === id && b.invalid).length;
+  say('已更新箱型：' + it.name + (bad ? '，其中 ' + bad + ' 只按新尺寸放不下，已标红' : ''));
+  return { ok: true, item: it };
+}
+
+/** 几何缓存里丢掉某个箱型的（尺寸改了必须丢，否则还按旧尺寸画） */
+function dropGeo(skuId) {
+  Array.from(geoCache.keys()).forEach((k) => { if (k.indexOf(skuId + '|') === 0) geoCache.delete(k); });
 }
 
 /** 在柜里找一个真正放得下的空位（先低后高、先近门后往里），不再一律扔到 (0,0,0) */
@@ -580,7 +652,9 @@ function addOne(skuId) {
   say('已放入一只 ' + it.name + '（x=' + Math.round(r.box.x) + ' y=' + Math.round(r.box.y) + '），共 ' + model.boxes.length + ' 只');
 }
 
-function paintForm() {
+/** 打开表单：editingId 为 null 是新建，否则是改旧箱型 */
+let editingSku = null;
+function paintForm(prefill) {
   const shape = CL.shapes.get(formShape);
   document.querySelectorAll('#shapes button').forEach((b) => {
     b.classList.toggle('on', b.dataset.shape === formShape);
@@ -594,41 +668,89 @@ function paintForm() {
     lb.textContent = f.label;
     const inp = document.createElement('input');
     inp.dataset.key = f.key;
-    inp.value = shape.defaults[f.key];
+    inp.value = prefill && prefill[f.key] != null ? prefill[f.key] : shape.defaults[f.key];
     inp.setAttribute('inputmode', 'numeric');
     wrap.appendChild(lb); wrap.appendChild(inp);
     box.appendChild(wrap);
   });
 }
+function openEdit(skuId) {
+  const it = itemsById[skuId];
+  if (!it) return;
+  editingSku = skuId;
+  formShape = it.shape;
+  const f = document.getElementById('form');
+  f.classList.add('on');
+  document.getElementById('f-err').textContent = '';
+  paintForm(it.values);
+  document.getElementById('f-name').value = it.name;
+  document.getElementById('f-qty').value = it.qty;
+  f.scrollIntoView({ block: 'nearest' });
+}
+function closeForm() {
+  document.getElementById('form').classList.remove('on');
+  editingSku = null;
+}
 
 document.getElementById('new-sku').addEventListener('click', () => {
   const f = document.getElementById('form');
-  const on = f.classList.toggle('on');
-  if (on) { document.getElementById('f-err').textContent = ''; paintForm(); }
+  if (f.classList.contains('on') && editingSku === null) { closeForm(); return; }
+  editingSku = null;
+  f.classList.add('on');
+  document.getElementById('f-err').textContent = '';
+  paintForm();
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-qty').value = '10';
 });
 document.querySelectorAll('#shapes button').forEach((b) => {
-  b.addEventListener('click', () => { formShape = b.dataset.shape; paintForm(); });
+  b.addEventListener('click', () => {
+    if (editingSku) { say('改尺寸时不能换箱型，删了重建一个', true); return; }
+    formShape = b.dataset.shape;
+    paintForm();
+  });
 });
 document.getElementById('f-cancel').addEventListener('click', () => {
-  document.getElementById('form').classList.remove('on');
+  closeForm();
 });
 document.getElementById('f-save').addEventListener('click', () => {
   const shape = CL.shapes.get(formShape);
   const values = {};
   document.querySelectorAll('#fields input').forEach((i) => { values[i.dataset.key] = i.value.trim(); });
   const qty = document.getElementById('f-qty').value.trim();
+  const nameInput = document.getElementById('f-name').value.trim();
   const errEl = document.getElementById('f-err');
   const errs = shape.checks(values);
   if (errs && errs.length) { errEl.textContent = errs[0]; return; }
   if (!(Number(qty) > 0)) { errEl.textContent = '数量要大于 0'; return; }
-  const nameInput = shape.name;
-  const r = addSku({ shape: formShape, values, qty, name: nameInput });
+  if (editingSku) {
+    const r = updateSku(editingSku, values, qty, nameInput);
+    if (!r.ok) { errEl.textContent = r.message || '保存失败'; return; }
+    errEl.textContent = '';
+    currentSku = editingSku;
+    closeForm();
+    renderSkuList();
+    return;
+  }
+  const r = addSku({ shape: formShape, values, qty, name: nameInput || shape.name });
   if (!r.ok) { errEl.textContent = r.message || '保存失败'; return; }
   errEl.textContent = '';
-  document.getElementById('form').classList.remove('on');
+  closeForm();
   currentSku = r.item.id;
   renderSkuList();
   say('已新建箱型：' + r.item.name + ' ' + summarise(r.item));
+});
+
+// Delete / Backspace 删掉选中箱
+addEventListener('keydown', (ev) => {
+  if (!canvasFocused()) return;
+  if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+  if (!selected) return;
+  ev.preventDefault();
+  const r = CL.manualModel.remove(model, selected);
+  if (!r.ok) { say('删不掉：' + (r.message || r.reason), true); return; }
+  selected = null;
+  refreshAll();
+  say('已删除一只，剩 ' + model.boxes.length + ' 只');
 });
 renderSkuList();
 
