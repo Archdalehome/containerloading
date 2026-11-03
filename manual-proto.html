@@ -591,7 +591,16 @@ function doPair() {
         trial, it, { step: 10, tol: 1 }
       );
       // 必须真接触：缝隙 ≤1mm（不许悬着），但允许只碰到一部分（不要求整面压满）
-      if (fit.overlap <= 1 && fit.gap <= 1) { cand = trial; break outer; }
+      if (fit.overlap > 1 || fit.gap > 1) continue;
+      // 物理常识：箱心正下方必须真的压在下方箱体上（否则是"搭在一条边上、整体悬空"）
+      const lx = trial.x + trial.l / 2 - b.x;
+      const ly = trial.y + trial.w / 2 - b.y;
+      const span = CL.solid.spanAt({ x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: b.pose }, it, lx, ly);
+      if (!span) continue;
+      const lowerTop = b.z + span[1];
+      if (Math.abs(lowerTop - trial.z) > 1) continue;   // 箱心下方没有碰到 → 悬空，不接受
+      cand = trial;
+      break outer;
     }
   }
   if (!cand) { say('对扣放不下：这段高度里找不到严丝合缝的位置', true); return; }
