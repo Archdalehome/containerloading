@@ -982,6 +982,49 @@ try {
     console.log('  对扣特写：' + outPair + '（层姿态 ' + (pairShot.kinds || []).join(',') + '）');
   }
 
+  // 斜顶那单（200 箱 → 90 箱/柜）的整页截图：给用户看修复后的结果
+  const slope90 = await cdp.evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const $ = (s) => document.querySelector(s);
+    const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+    const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const setVal = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    while ($$('.sku-card').length > 1) { click($$('.sku-card')[$$('.sku-card').length - 1].querySelector('[data-act="delete"]')); await wait(30); }
+    const preset = $('.preset[data-key="40GP"]');
+    if (preset) click(preset);
+    await wait(80);
+    let c0 = $$('.sku-card')[0];
+    const id0 = c0.dataset.id;
+    click(c0.querySelector('.shape-tab[data-shape="slope"]'));
+    await wait(80);
+    c0 = document.querySelector('.sku-card[data-id="' + id0 + '"]');
+    const set = (k, v) => setVal(c0.querySelector('.v-input[data-key="' + k + '"]'), v);
+    set('L', '2000'); set('W', '470'); set('Hlow', '410'); set('Hhigh', '900');
+    setVal(c0.querySelector('.qty-input'), '200');
+    click($('#calc-btn'));
+    await wait(1000);
+    if (window.CL3D) window.CL3D.setView({ theta: 0.92, phi: 1.02, radius: 9000 });
+    await wait(300);
+    const r = document.getElementById('viewer-card').getBoundingClientRect();
+    return {
+      x: Math.round(r.left + window.scrollX), y: Math.round(r.top + window.scrollY),
+      width: Math.round(r.width), height: Math.round(r.height),
+      boxes: window.CL.app.lastPack.totals.loadedCount,
+      layers: window.CL.app.lastPack.layers.map((l) => l.kind + ':' + l.count),
+      usedH: window.CL.app.lastPack.usedHeight
+    };
+  })()`);
+  if (slope90) {
+    const shot = await cdp.send('Page.captureScreenshot', {
+      format: 'png', captureBeyondViewport: true,
+      clip: { x: slope90.x, y: slope90.y, width: slope90.width, height: slope90.height, scale: 1 }
+    });
+    const outSlope = OUT_PNG.replace('.png', '-slope90.png');
+    fs.writeFileSync(outSlope, Buffer.from(shot.data, 'base64'));
+    console.log('  斜顶 200 箱：' + slope90.boxes + ' 箱/柜，层 ' + slope90.layers.join(' ')+
+      '，用高 ' + slope90.usedH + ' → ' + outSlope);
+  }
+
   // 两种状态的截图：全部装入（302 箱，40GP L 形 + 垫块）与装不下（1000 箱）
   // 注意：必须「算一个 → 截一张 → 再改数量」，否则两张都会截到最后一次计算的状态
   const setupState = `(async () => {
