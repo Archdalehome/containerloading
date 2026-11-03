@@ -31,6 +31,10 @@
    * 顶面能不能继续往上叠：所有承重面必须都在本层层厚的高度上、且盖满整层底面。
    * 直接复用引擎的 poseStackable，避免两边各有一份口径（正放 L 的台阶面比顶面低，
    * 只按面积求和会把「台阶 + 顶面」当成一整块平顶，704×482 的参考解就是这么算错的）。
+   *
+   * 斜顶单只例外：不论正放还是侧放，上方一律不许压箱（物理红线：斜顶单只只能放一层）。
+   * 侧放后顶面虽然是平面，但箱体自身是楔形，压上去会沿着斜面挤出；
+   * validatePhysics 的 slope-top-loaded 就是这么判的，层型这边必须同一口径。
    */
   function topStackable(item, pose) {
     if (!NS.pack.poseStackable) return true;
@@ -73,6 +77,17 @@
           var nx2 = Math.max(0, Math.floor((c.innerL + 1e-6) / f.l));
           var ny2 = Math.max(0, Math.floor((c.innerW + 1e-6) / f.w));
           if (nx2 <= 0 || ny2 <= 0) return;
+          // 对扣层要能真正落位：底件用同朝向的正放姿态，上件是它的镜像翻转件
+          var lower = null;
+          (NS.pack.posesFor(item) || []).forEach(function (p) {
+            if (lower) return;
+            if (p.flip || p.vertical !== 2) return;
+            if (Math.abs(p.fx - f.l) > 1e-6 || Math.abs(p.fy - f.w) > 1e-6) return;
+            lower = p;
+          });
+          if (!lower) return;
+          var upper = NS.pack.findFlipPose ? NS.pack.findFlipPose(item, lower) : null;
+          if (!upper) return;
           var cl2 = nx2 * f.l;
           var cw2 = ny2 * f.w;
           out.push({
@@ -81,6 +96,7 @@
             cover: { l: cl2, w: cw2 },
             fullFloor: cl2 >= c.innerL - 1 && cw2 >= c.innerW - 1,
             stackable: true,
+            pair: { lower: lower, upper: upper, nx: nx2, ny: ny2 },
             stripCap: stripCapacity(item, { fx: f.l, fy: f.w }, c, nx2, ny2)
           });
         });
@@ -232,31 +248,70 @@
   }
 
   /**
-   * 层列式空间内的最优（可叠层自由组合 + 一个不可叠顶层）。
-   * 返回 { boxes, height, layers[] }。层型重复次数受 SKU 剩余量约束，超出的层从顶部裁掉。
+   * 层列式空间内的最优：记忆化搜索 best(已用高度, 当前覆盖矩形, 各 SKU 剩余量)。
+   *
+   * 为什么不用高度背包：背包把「同一层型用几次」当无约束，事后按 SKU 剩余量裁掉超量层——
+   * 那会先找到「264 箱最优路径」（斜顶只有 190 箱），再在回溯时悄悄砍成 162，
+   * 得到的数既不是最优也不可行。用量必须进搜索状态。
+   *
+   * 柜内最多 9 层（2698 / 最小层厚 300），状态很浅；再把 (已用高度, 覆盖矩形, 剩余量)
+   * 当记忆化键，同一状态的重复层序排列只算一次，不会因为「先放 A 再放 B」和「先 B 后 A」炸开。
    */
-  function solve(items, container) {
+  function solve(items, container, opts) {
     var types = allTypes(items, container);
-    var r = knapsack(types, container.innerH, { relax: false });
-    // SKU 剩余量上限：一个层型用了几次 × 每层箱数不能超过剩余
-    var bySku = {};
-    (items || []).forEach(function (it) { bySku[it.id] = it; });
-    var used = {};
-    var seq = [];
-    var boxes = 0;
-    var height = 0;
-    r.seq.forEach(function (t) {
-      var it = bySku[t.skuId];
-      if (!it) return;
-      var u = (used[t.skuId] || 0) + t.boxes;
-      if (u > it.remaining) return; // 这个 SKU 的货不够了，这层放不了
-      used[t.skuId] = u;
-      seq.push(t);
-      boxes += t.boxes;
-      height += t.thickness;
+    var H = Math.floor(container.innerH);
+    var ids = [];
+    var rem0 = {};
+    (items || []).forEach(function (it) {
+      if (ids.indexOf(it.id) < 0) ids.push(it.id);
+      rem0[it.id] = it.remaining;
     });
-    return { boxes: boxes, height: height, layers: seq };
+    var memo = Object.create(null);
+    var nodes = 0;
+    var nodeCap = (opts && opts.nodeCap) || 200000;
+
+    function remSig(rem) {
+      var s = '';
+      for (var i = 0; i < ids.length; i++) s += rem[ids[i]] + ',';
+      return s;
+    }
+
+    function best(h, cl, cw, rem) {
+      var k = h + '|' + cl + 'x' + cw + '|' + remSig(rem);
+      var hit = memo[k];
+      if (hit) return hit;
+      nodes++;
+      var out = { boxes: 0, height: 0, layers: [] };
+      var hLeft = H - h;
+      if (hLeft > 0 && nodes <= nodeCap) {
+        for (var i = 0; i < types.length; i++) {
+          var t = types[i];
+          if (rem[t.skuId] < t.boxes) continue;
+          if (t.thickness > hLeft + 1e-6) continue;
+          if (t.cover.l > cl + 1e-6 || t.cover.w > cw + 1e-6) continue;
+          var sub = { boxes: 0, height: 0, layers: [] };
+          if (t.stackable) {
+            // 只有顶面平整的层型才能继续往上叠
+            var r2 = Object.assign({}, rem);
+            r2[t.skuId] -= t.boxes;
+            sub = best(h + t.thickness, t.cover.l, t.cover.w, r2);
+          }
+          var tot = t.boxes + sub.boxes;
+          if (tot > out.boxes) {
+            out = { boxes: tot, height: t.thickness + sub.height, layers: [t].concat(sub.layers) };
+          }
+        }
+      }
+      memo[k] = out;
+      return out;
+    }
+
+    var r = best(0, 1e9, 1e9, rem0);
+    r.nodes = nodes;
+    r.truncated = nodes > nodeCap;
+    return r;
   }
+
 
   /** 上界：放宽「顶层」约束（不可叠层也能当中间层）+ 体积界 + 载重界，取最小 */
   function bound(items, container) {

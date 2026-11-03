@@ -440,7 +440,11 @@ function pageTestScript() {
   await wait(300);
   const stripPack = window.CL.app.lastPack;
   const stripCount = stripPack.layers.reduce((s, L) => s + (L.stripCount || 0), 0);
-  step('同款换姿态填条带生效', stripCount > 0, '条带箱数 ' + stripCount + ' · 共 ' + stripPack.totals.loadedCount + ' 箱');
+  // 条带填缝只是手段之一：层型最优方案（550 那单 960 箱）不靠条带也能超过条带方案，
+  // 所以判「收益没丢」——要么用了条带，要么总箱数不低于条带基线 872。
+  step('同款换姿态填条带生效（或层型最优更优）',
+    stripCount > 0 || stripPack.totals.loadedCount >= 872,
+    '条带箱数 ' + stripCount + ' · 共 ' + stripPack.totals.loadedCount + ' 箱');
   const layerTbl = $$('#result-body .tbl').find((t) => t.textContent.includes('层顶高度'));
   step('分层明细分开显示主姿态 / 条带',
     !!layerTbl && layerTbl.textContent.includes('主姿态 / 换姿态填条带'), layerTbl ? 'ok' : '没有分层表');
@@ -682,7 +686,7 @@ function pageTestScript() {
   step('40GP 本单体检四项全 0', health40.includes('全部通过'), health40.replace(/\s+/g, ' ').slice(0, 120));
 
   const chips = $$('.plan-chip');
-  step('结果页列出全部方案', chips.length === 48, '方案条 ' + chips.length);
+  step('结果页列出全部方案', chips.length === 49, '方案条 ' + chips.length + '（48 个贪心 + 1 个层型最优）');
   if (chips.length > 3) {
     click(chips[3]);
     await wait(150);
@@ -879,15 +883,28 @@ try {
         const mesh = findMesh(shape);
         if (!mesh) return null;
         const pos = mesh.geometry.attributes.position;
-        let lFront = -1e9, lBack = -1e9, sLow = -1e9, sHigh = -1e9;
+        let lFront = -1e9, lBack = -1e9, lLeft = -1e9, lRight = -1e9;
         for (let i = 0; i < pos.count; i++) {
           const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
           if (z < -50) lFront = Math.max(lFront, y);
           if (z > 0) lBack = Math.max(lBack, y);
-          if (x < -100) sLow = Math.max(sLow, y);
-          if (x > 100) sHigh = Math.max(sHigh, y);
+          if (x < -100) lLeft = Math.max(lLeft, y);
+          if (x > 100) lRight = Math.max(lRight, y);
         }
-        return { lFront, lBack, sLow, sHigh };
+        // 台阶方向跟着姿态走：正放时沿深度（z）分段，侧放时台阶变成「底面缺口」，
+        // 从上面看是平的、量 y 的落差量不出来。所以再补一个与姿态无关的判据：
+        // 外接长方体只有 8 个不同顶点，真实 L 形至少 12 个（缺口要 4 个顶点）。
+        const uniq = new Set();
+        for (let i = 0; i < pos.count; i++) {
+          uniq.add(Math.round(pos.getX(i)) + ',' + Math.round(pos.getY(i)) + ',' + Math.round(pos.getZ(i)));
+        }
+        const zSpread = Math.abs(lBack - lFront);
+        const xSpread = Math.abs(lRight - lLeft);
+        return {
+          lFront, lBack, zSpread, xSpread,
+          spread: Math.max(zSpread, xSpread),
+          vertices: uniq.size
+        };
       };
       return stat('lshape');
     })();
@@ -932,7 +949,7 @@ try {
     // 几何校验：非矩形箱必须是真实形状，不能退化成外接长方体
     // L 形在物理修正后是「顶层」箱型，本场景可能装不下；装不下时跳过顶点检查，
     // L 形的真实几何由引擎测试（stepSurface / 缺口嵌合）覆盖。
-    geomOk.lshape = !mixed.lshape || (mixed.lshape.lBack - mixed.lshape.lFront) > 100;
+    geomOk.lshape = !mixed.lshape || mixed.lshape.spread > 100 || mixed.lshape.vertices >= 10;
     geomOk.lshapeSkipped = !mixed.lshape;
     geomOk.slope = !!(mixed.slope && (mixed.slope.high - mixed.slope.low) > 100);
 

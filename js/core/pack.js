@@ -1321,19 +1321,74 @@
       }
     });
 
-    // 2. 斜顶单只上方不得有箱
+    // 2. 上方箱的底面必须与下方顶面贴合（采样判，不按箱型禁叠）
+    //
+    // 之前这里写的是「斜顶单只上方不得有箱」——错的。斜顶上方不是不能压，是**平底箱压上去放不平**；
+    // 一正一倒的箱子底面与斜面互补，正好贴平。所以判据只能是「底面与顶面是否贴合」，
+    // 按箱型一刀切会把合法的侧倒对扣也一起挡掉。
+    //
+    // 性能：只查「下方有非矩形箱」的接触，并按接触高度建索引；纯矩形堆叠由第 1 条的 covers 覆盖，
+    // 全部逐箱采样会让 1820 箱那种输入从毫秒级涨到分钟级。
+    var topByLevel = {};
     (pack.placements || []).forEach(function (p) {
-      var it = itemsById[p.skuId];
-      if (!it || it.shape !== 'slope') return;
-      if (p.kind === 'pair-lower' || p.kind === 'pair-upper') return;
-      (pack.placements || []).forEach(function (q) {
-        if (q === p) return;
-        if (q.z < p.z + p.h - EPS) return;
-        if (q.x < p.x + p.l - EPS && q.x + q.l > p.x + EPS &&
-            q.y < p.y + p.w - EPS && q.y + q.w > p.y + EPS) {
-          errs.push({ code: 'slope-top-loaded', message: '斜顶箱单只上方压了箱子', placement: p, by: q });
-        }
+      var k = key(p.z + p.h);
+      (topByLevel[k] = topByLevel[k] || []).push(p);
+    });
+    (pack.placements || []).forEach(function (q) {
+      if (q.z <= EPS) return;
+      if (q.kind === 'pair-upper' || q.kind === 'pair-upper-l') return; // 对扣上件另由第 3 条验
+      var near = (topByLevel[key(q.z)] || []).filter(function (p) {
+        if (p === q) return false;
+        return p.x < q.x + q.l - EPS && q.x < p.x + p.l - EPS &&
+               p.y < q.y + q.w - EPS && q.y < p.y + p.w - EPS;
       });
+      if (!near.length) return;
+      var itQ = itemsById[q.skuId];
+      var nonRect = (itQ && itQ.shape !== 'rect') || near.some(function (p) {
+        var ip = itemsById[p.skuId];
+        return ip && ip.shape !== 'rect';
+      });
+      if (!nonRect) return;
+      // 垫块也是真实承重面（填平缺口用的），命中垫块顶面就算贴合
+      var dun = (pack.dunnage || []).filter(function (b) {
+        return Math.abs(b.z + b.h - q.z) <= 1 &&
+          b.x < q.x + q.l - EPS && q.x < b.x + b.l - EPS &&
+          b.y < q.y + q.w - EPS && q.y < b.y + b.w - EPS;
+      });
+      var step = 50;
+      var nx = Math.max(1, Math.ceil(q.l / step));
+      var ny = Math.max(1, Math.ceil(q.w / step));
+      var bad = 0;
+      var worst = 0;
+      for (var i = 0; i < nx; i++) {
+        for (var j = 0; j < ny; j++) {
+          var X = q.x + (i + 0.5) * q.l / nx;
+          var Y = q.y + (j + 0.5) * q.w / ny;
+          var sq = SOLID.spanAt(q, itQ, X, Y);
+          if (!sq || Math.abs(sq[0] - q.z) > 1) continue; // 这一列不是上件的底面
+          var onDun = dun.some(function (b) {
+            return X >= b.x - EPS && X <= b.x + b.l + EPS && Y >= b.y - EPS && Y <= b.y + b.w + EPS;
+          });
+          if (onDun) continue;
+          var top = -Infinity;
+          for (var k2 = 0; k2 < near.length; k2++) {
+            var sp = SOLID.spanAt(near[k2], itemsById[near[k2].skuId], X, Y);
+            if (sp && sp[1] > top) top = sp[1];
+          }
+          var gap = Math.abs(top - q.z);
+          if (gap > 1) {
+            bad++;
+            if (gap > worst) worst = gap;
+          }
+        }
+      }
+      if (bad > 0) {
+        errs.push({
+          code: 'not-flush',
+          message: '上方箱底面与下方顶面不贴合：' + bad + ' 个采样列，最大间隙 ' + S.num(worst) + ' mm',
+          placement: q
+        });
+      }
     });
 
     // 3. 对扣贴合
@@ -1386,6 +1441,180 @@
     });
 
     return errs;
+  }
+
+  /* ---------- 层型最优（记忆化搜索）---------- */
+
+  /**
+   * 把「层型序列」落成真实摆放。
+   *
+   * 主循环是一个 SKU 一次只挑一个姿态铺到底，遇到「4 层 550 + 1 层 450」这种混层就比最优少；
+   * 层型搜索（js/core/layerdp.js）给的是最优序列，这里负责把它变成箱体坐标。
+   * 两条路径各算一份，谁箱数多谁当最优；任何一条过不了 validatePhysics 就作废，不参与排名。
+   */
+  function runExact(state) {
+    var D = NS.layerdp;
+    if (!D && typeof require === 'function') {
+      try { D = require('./layerdp.js'); } catch (e) { D = null; }
+    }
+    if (!D) return null;
+    var c = parseContainer(state.container || {});
+    var items = buildItems(state.rows || [], c);
+    // 记忆化的键里含「各 SKU 剩余量」，SKU 一多状态数就爆（实测 20 SKU × 5000 箱要 5.4 秒，
+    // 超过 2 秒的硬上限）。所以只在小规模混装时启用；其余仍走贪心主循环。
+    var live = items.filter(function (it) { return it.placeable && it.qty > 0; });
+    if (live.length > 6) return null;
+    var sol = D.solve(items, c, { nodeCap: 40000 });
+    if (!sol || !sol.boxes) return null;
+    if (sol.boxes > MAX_BOXES) return null;
+
+    var byId = {};
+    items.forEach(function (it) { byId[it.id] = it; });
+    var placements = [];
+    var layers = [];
+    var z = 0;
+
+    for (var li = 0; li < sol.layers.length; li++) {
+      var t = sol.layers[li];
+      var it = byId[t.skuId];
+      if (!it) return null;
+      var layerZ = z;
+      var placed = 0;
+      var capacity = 0;
+
+      if (t.kind === 'pair') {
+        if (!t.pair) return null;
+        var lo = t.pair.lower;
+        var up = t.pair.upper;
+        var sv = it.shapeValues;
+        capacity = t.pair.nx * t.pair.ny * 2;
+        for (var pr = 0; pr < t.pair.ny; pr++) {
+          for (var pc = 0; pc < t.pair.nx; pc++) {
+            var px = pc * lo.fx;
+            var py = pr * lo.fy;
+            placements.push({
+              skuId: it.id, index: it.index, col: pc + 1, row: pr + 1,
+              x: px, y: py, z: layerZ, l: lo.fx, w: lo.fy, h: lo.thickness,
+              rot: 90, layer: li, pose: lo.m, kind: 'pair-lower'
+            });
+            placements.push({
+              skuId: it.id, index: it.index, col: pc + 1, row: pr + 1,
+              x: px, y: py, z: layerZ + sv.hlow, l: up.fx, w: up.fy, h: up.thickness,
+              rot: 90, layer: li, pose: up.m,
+              kind: it.shape === 'lshape' ? 'pair-upper-l' : 'pair-upper'
+            });
+            placed += 2;
+          }
+        }
+        layers.push({
+          index: li, skuId: it.id, skuName: it.name, shapeName: it.shapeName,
+          count: placed, capacity: capacity, height: t.thickness, z: layerZ,
+          top: layerZ + t.thickness, rot: 90, kind: 'pair', fill: [],
+          mainCount: placed, stripCount: 0, stripTop: layerZ + t.thickness,
+          stripFills: [], dunnage: 0, pose: null
+        });
+      } else {
+        var pose = t.pose;
+        if (!pose) return null;
+        var nx = Math.max(0, Math.floor((c.innerL + EPS) / pose.fx));
+        var ny = Math.max(0, Math.floor((c.innerW + EPS) / pose.fy));
+        capacity = nx * ny;
+        for (var r = 0; r < ny; r++) {
+          for (var col = 0; col < nx; col++) {
+            placements.push({
+              skuId: it.id, index: it.index, col: col + 1, row: r + 1,
+              x: col * pose.fx, y: r * pose.fy, z: layerZ,
+              l: pose.fx, w: pose.fy, h: pose.thickness,
+              rot: pose.fx === it.bbox.l ? 0 : 90, layer: li, pose: pose.m,
+              kind: pose.side ? 'side' : 'normal'
+            });
+            placed++;
+          }
+        }
+        layers.push({
+          index: li, skuId: it.id, skuName: it.name, shapeName: it.shapeName,
+          count: placed, capacity: capacity, height: pose.thickness, z: layerZ,
+          top: layerZ + pose.thickness, rot: pose.fx === it.bbox.l ? 0 : 90,
+          kind: pose.side ? 'side' : 'normal', fill: [], mainCount: placed,
+          stripCount: 0, stripTop: layerZ + pose.thickness, stripFills: [],
+          dunnage: 0, pose: pose.m
+        });
+      }
+      z += t.thickness;
+    }
+
+    // 逐 SKU 结算
+    var loadedNet = 0;
+    var loadedOuter = 0;
+    var requestedWeight = 0;
+    var loadedWeight = 0;
+    var anyWeight = false;
+    items.forEach(function (it) {
+      it.loaded = 0;
+      it.remaining = it.qty;
+    });
+    placements.forEach(function (p) {
+      var it = byId[p.skuId];
+      if (!it) return;
+      it.loaded++;
+      loadedWeight += it.unitWeight || 0;
+    });
+    items.forEach(function (it) {
+      if (it.loaded > it.qty) return; // 不会发生，但宁可整条作废
+      it.remaining = it.qty - it.loaded;
+      loadedNet += it.loaded * it.netVolumeEach;
+      loadedOuter += it.loaded * it.bboxVolumeEach;
+      if (it.unitWeight !== null) {
+        requestedWeight += it.qty * it.unitWeight;
+        anyWeight = true;
+      }
+      if (it.remaining > 0) {
+        it.reason = {
+          code: 'height',
+          message: '层型最优方案用高 ' + S.num(z) + ' mm，剩余高度放不下更多整层'
+        };
+      }
+    });
+    // 超重就交回贪心（贪心会按重量逐层收口），这里不做半吊子裁剪
+    if (anyWeight && loadedWeight > c.payload + EPS) return null;
+
+    var loadedCount = items.reduce(function (s, it) { return s + it.loaded; }, 0);
+    var requestedCount = items.reduce(function (s, it) { return s + it.qty; }, 0);
+    var containerVolume = c.innerL * c.innerW * c.innerH;
+    var allLoaded = loadedCount === requestedCount;
+
+    return {
+      ok: true,
+      container: c,
+      items: items,
+      placements: placements,
+      layers: layers,
+      dunnage: [],
+      usedHeight: z,
+      containerVolume: containerVolume,
+      stop: allLoaded
+        ? { code: 'all-loaded', message: '全部装载完成' }
+        : { code: 'height', message: '层型最优方案用高 ' + S.num(z) + ' mm，剩余高度放不下更多整层' },
+      truncated: false,
+      options: { allowFill: false },
+      exact: true,
+      totals: {
+        requestedCount: requestedCount,
+        loadedCount: loadedCount,
+        remainingCount: requestedCount - loadedCount,
+        netVolume: loadedNet,
+        bboxVolume: loadedOuter,
+        fillRate: containerVolume > 0 ? loadedNet / containerVolume : 0,
+        spaceUsage: containerVolume > 0 ? loadedOuter / containerVolume : 0,
+        weight: loadedWeight,
+        requestedWeight: requestedWeight,
+        payload: c.payload,
+        weightKnown: (anyWeight && items.every(function (it) { return it.unitWeight !== null; })),
+        overloaded: requestedWeight > c.payload + EPS,
+        layerCount: layers.length,
+        heightUsage: c.innerH > 0 ? z / c.innerH : 0
+      }
+    };
   }
 
   /* ---------- 多方案枚举 ---------- */
@@ -1536,6 +1765,35 @@
       });
     });
 
+    // 第 49 个方案：层型最优序列（记忆化搜索）。与贪心各自算一份，谁箱数多谁当最优。
+    // 物理校验不过就整条作废——层型搜索只做尺寸运算，落位对不对得由 validatePhysics 说了算。
+    var exact = null;
+    try {
+      exact = runExact(state);
+    } catch (e) {
+      exact = null;
+    }
+    if (exact && exact.totals.loadedCount > 0) {
+      var exactErrs = validatePhysics(exact);
+      plans.push({
+        config: {
+          key: 'exact', label: '层型最优 · 记忆化搜索',
+          policy: { key: 'exact', label: '层型最优' },
+          order: { key: 'exact', label: '记忆化搜索' },
+          fill: false, dunnage: false
+        },
+        pack: exact,
+        valid: exactErrs.length === 0,
+        errors: exactErrs,
+        boxes: exact.totals.loadedCount,
+        net: exact.totals.netVolume,
+        fillRate: exact.totals.fillRate,
+        cog: cogOf(exact),
+        dunnageBlocks: 0,
+        gated: false
+      });
+    }
+
     var valid = plans.filter(function (p) { return p.valid; }).sort(rankCompare);
     var eligible = valid.filter(function (p) { return !p.gated; });
     var bestGated = valid.filter(function (p) { return p.gated; })[0] || null;
@@ -1574,6 +1832,8 @@
     },
     posesFor: posesFor,
     poseStackable: poseStackable,
+    findFlipPose: findFlipPose,
+    findNormalPose: findNormalPose,
     covers: covers,
     MAX_BOXES: MAX_BOXES,
     overlaps: function (a, b) {

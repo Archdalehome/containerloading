@@ -834,8 +834,9 @@ test('斜面承重：斜顶箱顶上再放箱必须报错', () => {
   assert.ok(errs.some((e) => e.code === 'floating' || e.code === 'slope-top-loaded'), JSON.stringify(errs.map((e) => e.code)));
 });
 
-test('单只斜顶上方压箱：单独构造一个「斜顶上方有箱」的摆法必须被 slope-top-loaded 抓到', () => {
-  // 把下件标记成对扣下件时不该报；正常单只时上层有箱要报
+test('单只斜顶上方压平底箱：按「贴合」判，必须报 not-flush（不是按箱型禁叠）', () => {
+  // 斜顶上方不是不能压，是平底箱压不上去贴不平；同向两只叠起来底面与斜面不贴合，采样必须抓到。
+  // 判据从「斜顶不许有箱」改成「底面与顶面贴合」，否则连一正一倒的对扣也会被误杀。
   const pack = {
     items: [slopeItem],
     placements: [
@@ -843,7 +844,8 @@ test('单只斜顶上方压箱：单独构造一个「斜顶上方有箱」的�
       { skuId: 's', x: 0, y: 0, z: 500, l: 600, w: 400, h: 500, layer: 1, kind: 'normal', pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] }
     ]
   };
-  assert.ok(P.validatePhysics(pack).some((e) => e.code === 'slope-top-loaded'));
+  assert.ok(P.validatePhysics(pack).some((e) => e.code === 'not-flush'),
+    '应报 not-flush，实际 ' + JSON.stringify(P.validatePhysics(pack).map((e) => e.code)));
 });
 
 test('对扣错位 2mm 必须报 pair-gap', () => {
@@ -880,7 +882,7 @@ test('runPlans：每个方案都过物理校验，排名按箱数 → 重心 →
     row('c', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 200, '', 'lshape')
   ];
   const ps = P.runPlans(state(C.get('40HQ'), rows, false));
-  assert.strictEqual(ps.compared, 48);
+  assert.strictEqual(ps.compared, 49, '48 个贪心方案 + 1 个层型最优方案');
   ps.plans.forEach((p) => {
     assert.deepStrictEqual(p.errors, [], '方案 #' + p.config.id + ' 物理校验未通过');
   });
@@ -919,7 +921,7 @@ test('5000 箱输入：枚举完成且 ≤ 2 秒', () => {
   const t0 = Date.now();
   const ps = P.runPlans(state(C.get('40HQ'), rows, false));
   const ms = Date.now() - t0;
-  assert.strictEqual(ps.compared, 24, '5000 箱档位应为 24 个方案');
+  assert.strictEqual(ps.compared, 25, '5000 箱档位应为 24 个贪心方案 + 1 个层型最优方案');
   assert.ok(ms <= 2000, '耗时 ' + ms + ' ms 超过 2 秒');
   console.log('      5000 箱 × ' + ps.compared + ' 方案耗时 ' + ms + ' ms');
 });
