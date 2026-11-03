@@ -13,7 +13,15 @@
 </style>
 </head>
 <body>
-<div id="hud">手动装柜原型 · 拖一只箱子：松手会<b>沉降 + 吸附</b>，越界或重叠会<b>回弹</b>并写明原因</div>
+<div id="hud">
+  手动装柜原型 · 拖一只箱子：松手会<b>沉降 + 吸附</b>，越界或重叠会<b>回弹</b>并写明原因
+  <div style="margin-top:6px;font-size:13px">
+    选中后：<button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
+    <button id="cp">复制</button> <button id="un">撤销</button>
+    <span style="color:#94a3b8">（键：1/2/3 旋转 · Ctrl+C/V 复制 · Ctrl+Z 撤销）</span>
+  </div>
+  <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
+</div>
 <div id="status">状态：待拖动</div>
 <div id="stat2" style="position:fixed;right:16px;top:14px;z-index:2;background:rgba(15,23,42,.82);padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.7"></div>
 <script>
@@ -222,15 +230,120 @@ window.__PROTO.selfTest = function () {
   return out;
 };
 
-// 把三个诊断数直接写进页面，截图就能读到
+// ---- Step 2：选中 / 旋转 / 复制 / 撤销 / 计数 ----
+let selected = null;
+const SELECT_COLOR = 0xf59e0b;
+const BASE_COLOR = 0x2563eb;
+
+function paintSelection() {
+  meshes.forEach((m, uid) => {
+    m.material = uid === selected ? new THREE.MeshLambertMaterial({ color: SELECT_COLOR }) : mat;
+  });
+}
+
+function refreshAll() {
+  // 模型变了：删掉多余网格，同步剩下的
+  const ids = new Set(model.boxes.map((b) => b.uid));
+  meshes.forEach((m, uid) => {
+    if (!ids.has(uid)) { scene.remove(m); meshes.delete(uid); }
+  });
+  model.boxes.forEach((b) => syncMesh(b));
+  paintSelection();
+  paintCount();
+}
+
+function paintCount() {
+  const cs = CL.manualModel.counts(model);
+  document.getElementById('count').textContent =
+    cs.map((x) => x.name + ' ' + x.placed + '/' + x.want).join(' · ') +
+    (selected ? ' · 已选中 #' + selected : '');
+}
+
+function doRotate(axis) {
+  if (!selected) { say('先点选一只箱子', true); return; }
+  const r = CL.manualModel.rotate(model, selected, axis);
+  if (!r.ok) { say('转不了：' + (r.message || r.reason), true); return; }
+  refreshAll();
+  say('已绕 ' + axis.toUpperCase() + ' 转 90°，高 ' + Math.round(r.box.h) + 'mm');
+}
+
+function doCopy() {
+  if (!selected) { say('先点选一只箱子', true); return; }
+  const r = CL.manualModel.copy(model, selected);
+  if (!r.ok) { say('复制不了：' + (r.message || r.reason), true); return; }
+  selected = r.box.uid;
+  refreshAll();
+  say('已复制一只（共 ' + model.boxes.length + ' 只）');
+}
+
+function doUndo() {
+  const r = CL.manualModel.undo(model);
+  if (!r.ok) { say('没有可撤销的操作', true); return; }
+  if (!model.boxes.some((b) => b.uid === selected)) selected = null;
+  refreshAll();
+  say('已撤销（共 ' + model.boxes.length + ' 只）');
+}
+
+['x', 'y', 'z'].forEach((axis) => {
+  document.getElementById('r' + axis).addEventListener('click', () => doRotate(axis));
+});
+document.getElementById('cp').addEventListener('click', doCopy);
+document.getElementById('un').addEventListener('click', doUndo);
+
+// 快捷键只在画布有焦点时生效，且 preventDefault，避免吃掉页面的复制
+function canvasFocused() {
+  const el = document.activeElement;
+  return el === renderer.domElement || el === document.body || el === null;
+}
+addEventListener('keydown', (ev) => {
+  if (!canvasFocused()) return;
+  const k = ev.key.toLowerCase();
+  if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.preventDefault(); doUndo(); return; }
+  if ((ev.ctrlKey || ev.metaKey) && k === 'c') { ev.preventDefault(); if (selected) say('已记录 #' + selected); return; }
+  if ((ev.ctrlKey || ev.metaKey) && k === 'v') { ev.preventDefault(); doCopy(); return; }
+  if (k === '1') { ev.preventDefault(); doRotate('x'); }
+  if (k === '2') { ev.preventDefault(); doRotate('y'); }
+  if (k === '3') { ev.preventDefault(); doRotate('z'); }
+});
+
+// 点击选中（拖动的 pointerdown 里顺便记下 uid）
+renderer.domElement.addEventListener('click', () => {
+  if (lastDownUid) { selected = lastDownUid; paintSelection(); paintCount(); }
+});
+let lastDownUid = null;
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  setPointer(ev);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects([...meshes.values()], false);
+  lastDownUid = hits.length ? hits[0].object.userData.uid : null;
+}, true);
+
+window.__PROTO.selfTest2 = () => {
+  const out = {};
+  selected = model.boxes[0].uid;
+  const before = model.boxes.length;
+  doCopy(); doCopy();
+  out.copyGrew = model.boxes.length === before + 2;
+  out.countMatches = CL.manualModel.counts(model)[0].placed === model.boxes.length;
+  const h0 = model.boxes.find((b) => b.uid === selected).h;
+  doRotate('y');
+  out.rotated = model.boxes.find((b) => b.uid === selected).h !== h0;
+  doUndo(); doUndo(); doUndo();
+  out.undoBack = model.boxes.length === before;
+  return out;
+};
+
+// 把诊断数与两条验收写进页面，截图就能读到
 setTimeout(() => {
   const s = stats();
   const t = window.__PROTO.selfTest();
+  const t2 = window.__PROTO.selfTest2();
   document.getElementById('stat2').textContent =
-    'children=' + s.children + ' · calls=' + s.calls + ' · boxes=' + s.boxes +
-    ' | 撞墙拒绝=' + (t.wallRejected ? '✓' : '✗') + '(' + t.wallReason + ')' +
-    ' 模型未变=' + (t.modelUnchanged ? '✓' : '✗') +
-    ' | 落箱顶=' + (t.onTopOk && t.onTopZ === 300 ? '✓ z=' + t.onTopZ : '✗ z=' + t.onTopZ);
+    'children=' + s.children + ' · calls=' + s.calls + ' | 撞墙拒绝=' + (t.wallRejected ? '✓' : '✗') +
+    ' 模型未变=' + (t.modelUnchanged ? '✓' : '✗') + ' | 落箱顶=' + (t.onTopOk && t.onTopZ === 300 ? '✓' : '✗') +
+    ' | 复制+2=' + (t2.copyGrew ? '✓' : '✗') + ' 计数一致=' + (t2.countMatches ? '✓' : '✗') +
+    ' 旋转生效=' + (t2.rotated ? '✓' : '✗') + ' 撤销回原=' + (t2.undoBack ? '✓' : '✗');
+  paintCount();
 }, 900);
 </script>
 </body>
