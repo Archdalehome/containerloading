@@ -13,6 +13,7 @@
   var P = NS.pack;
   var SOLID = NS.solid;
   var EPS = 1e-6;
+  var SUPPORT_TOL = 20; // 支撑面外扩(mm)：手工拖放允许 20mm 以内的悬挑，别让差几毫米就叠不上
   var IDENT = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
   function overlapsXY(a, b) {
@@ -41,7 +42,9 @@
       box.h <= c.doorH + EPS; // 门高是硬约束
   }
 
-  /** 每一层的承重面（真实接触面，单位 mm） */
+  /** 每一层的承重面（真实接触面，单位 mm）。
+   *  支撑面按 SUPPORT_TOL 外扩：手工拖放不可能像素级对齐，允许很小的悬挑（默认 20mm），
+   *  既不会让“差几毫米就叠不上去”，也不会放过真正的大悬挑。 */
   function levelsOf(placed, itemsById) {
     var levels = { 0: [] };
     placed.forEach(function (p) {
@@ -49,7 +52,12 @@
       if (!it || !P.surfacesOf) return;
       P.surfacesOf(it, p).forEach(function (s) {
         var k = Math.round(s.z * 1000) / 1000;
-        (levels[k] = levels[k] || []).push(s.rect);
+        (levels[k] = levels[k] || []).push({
+          x: s.rect.x - SUPPORT_TOL,
+          y: s.rect.y - SUPPORT_TOL,
+          l: s.rect.l + SUPPORT_TOL * 2,
+          w: s.rect.w + SUPPORT_TOL * 2
+        });
       });
     });
     return levels;

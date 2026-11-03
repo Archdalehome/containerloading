@@ -573,9 +573,11 @@ window.__PROTO.selfTest2 = () => {
   const c2 = CL.manualModel.copy(tmp, uid);
   out.copyGrew = c1.ok && c2.ok && tmp.boxes.length === before + 2;
   out.countMatches = CL.manualModel.counts(tmp)[0].placed === tmp.boxes.length;
-  const h0 = tmp.boxes.find((b) => b.uid === uid).h;
-  CL.manualModel.rotate(tmp, uid, 'y');
-  out.rotated = tmp.boxes.find((b) => b.uid === uid).h !== h0;
+  // 转最上面那只：下面的箱子顶着它时旋转当然会重叠，那是物理对，不是 bug
+  const top = tmp.boxes.slice().sort((a, b) => (b.z + b.h) - (a.z + a.h))[0];
+  const h0 = top.h;
+  const rot = CL.manualModel.rotate(tmp, top.uid, 'y');
+  out.rotated = !!rot.ok && tmp.boxes.find((b) => b.uid === top.uid).h !== h0;
   CL.manualModel.undo(tmp); CL.manualModel.undo(tmp); CL.manualModel.undo(tmp);
   out.undoBack = tmp.boxes.length === before;
   return out;
