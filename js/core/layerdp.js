@@ -58,7 +58,8 @@
         boxes: nx * ny,
         cover: { l: cl, w: cw },
         fullFloor: cl >= c.innerL - 1 && cw >= c.innerW - 1,
-        stackable: topStackable(item, pose)
+        stackable: topStackable(item, pose),
+        stripCap: stripCapacity(item, pose, c, nx, ny)
       });
     });
     // 对扣：每对 2 箱，顶面拼平可叠
@@ -76,12 +77,38 @@
             boxes: nx2 * ny2 * 2,
             cover: { l: cl2, w: cw2 },
             fullFloor: cl2 >= c.innerL - 1 && cw2 >= c.innerW - 1,
-            stackable: true
+            stackable: true,
+            stripCap: stripCapacity(item, { fx: sv.l, fy: sv.w }, c, nx2, ny2)
           });
         }
       }
     }
     return out;
+  }
+
+  /**
+   * 条带最多还能塞几只（宽松估计，**只给上界用**）：
+   * 两条余带面积 ÷ 该 SKU 最小底面，向上取整。宁可高估——上界只要求「不低于真最优」，
+   * 可行解里条带箱要走引擎的逐箱支撑检查，不能拿这个估数当结果。
+   */
+  function stripCapacity(item, pose, c, nx, ny) {
+    var restX = c.innerL - nx * pose.fx;
+    var restY = c.innerW - ny * pose.fy;
+    if (restX <= 1 && restY <= 1) return 0;
+    // 只在「同款箱真有姿态能放进条带、且不高于本层层厚」时才估条带容量；
+    // 否则算出来的是高估，会把上界撑松（甚至撑到体积界）。
+    var best = 0;
+    (NS.pack.posesFor(item) || []).forEach(function (p) {
+      if (p.flip) return;
+      if (p.thickness > pose.thickness + 1e-6) return;
+      var cnt = 0;
+      if (p.fx <= restX + 1e-6) cnt = Math.max(cnt, Math.floor(restX / p.fx) * Math.floor(c.innerW / p.fy));
+      if (p.fy <= restY + 1e-6) cnt = Math.max(cnt, Math.floor(c.innerL / p.fx) * Math.floor(restY / p.fy));
+      if (p.fx <= restY + 1e-6) cnt = Math.max(cnt, Math.floor(restY / p.fx) * Math.floor(c.innerL / p.fy));
+      if (p.fy <= restX + 1e-6) cnt = Math.max(cnt, Math.floor(c.innerL / p.fy) * Math.floor(restX / p.fx));
+      if (cnt > best) best = cnt;
+    });
+    return best;
   }
 
   function allTypes(items, c) {
@@ -106,6 +133,7 @@
   function knapsack(types, innerH, opts) {
     var H = Math.floor(innerH);
     var relax = !!(opts && opts.relax);
+    var ignoreCover = !!(opts && opts.ignoreCover);
     var NEG = -1e9;
 
     // 覆盖矩形去重：FULL 表示整柜底面
@@ -133,11 +161,11 @@
         for (var i = 0; i < types.length; i++) {
           var t = types[i];
           if (!relax && !t.stackable) continue; // 不可叠的只能当最后一层
-          if (t.cover.l > covers[ci].l + 1e-6 || t.cover.w > covers[ci].w + 1e-6) continue;
+          if (!ignoreCover && (t.cover.l > covers[ci].l + 1e-6 || t.cover.w > covers[ci].w + 1e-6)) continue;
           var nh = h + Math.floor(t.thickness);
           if (nh > H) continue;
           var nci = t.coverIdx;
-          var val = cur + t.boxes;
+          var val = cur + t.boxes + (relax ? (t.stripCap || 0) : 0);
           var idx = nh * C + nci;
           if (val > dp[idx]) {
             dp[idx] = val;
@@ -165,7 +193,7 @@
           var top = null;
           for (var j = 0; j < types.length; j++) {
             var tt = types[j];
-            if (tt.cover.l > covers[c3].l + 1e-6 || tt.cover.w > covers[c3].w + 1e-6) continue;
+            if (!ignoreCover && (tt.cover.l > covers[c3].l + 1e-6 || tt.cover.w > covers[c3].w + 1e-6)) continue;
             if (h3 + Math.floor(tt.thickness) > H) continue;
             if (tt.boxes > add) { add = tt.boxes; top = tt; }
           }
@@ -230,7 +258,7 @@
   /** 上界：放宽「顶层」约束（不可叠层也能当中间层）+ 体积界 + 载重界，取最小 */
   function bound(items, container) {
     var types = allTypes(items, container);
-    var relaxed = knapsack(types, container.innerH, { relax: true }).boxes;
+    var relaxed = knapsack(types, container.innerH, { relax: true, ignoreCover: true }).boxes;
 
     // 体积界：全用净体积最小的箱子
     var minNet = Infinity;

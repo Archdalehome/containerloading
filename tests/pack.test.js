@@ -288,12 +288,24 @@ test('背包带覆盖约束：上层不能超出下层的覆盖范围（否则�
   });
 });
 
-test('背包算出的上界不会低于引擎实得（否则说明层型漏了东西，不能拿去显示）', () => {
-  const r = baseRow({ L: '400', W: '300', H: '300' }, 5000, '8');
-  const pack = enginePack('40HQ', [r], {});
-  const bd = DP.bound(pack.items, pack.container);
-  assert.ok(bd.boxes >= pack.totals.loadedCount,
-    '上界 ' + bd.boxes + ' 低于实得 ' + pack.totals.loadedCount);
+test('上界是「放宽后」的界：六组都 ≥ 引擎实得，且 90 与 872 上界=实得（可标已证明最优）', () => {
+  const cases = [
+    ['40HQ', baseRow({ L: '400', W: '300', H: '300' }, 5000, '8'), {}],
+    ['40GP', baseRow({ L: '400', W: '300', H: '300' }, 5000, '8'), {}],
+    ['40GP', baseRow({ L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '9', 'lshape'), { allowDunnage: true }],
+    ['40HQ', baseRow({ L: '550', W: '450', H: '300' }, 3000, '8'), {}],
+    ['40HQ', baseRow({ L: '610', W: '390', H: '310' }, 3000, '8'), {}],
+    ['40GP', baseRow({ L: '2000', W: '470', Hlow: '410', Hhigh: '900' }, 200, '5', 'slope'), {}]
+  ];
+  const tight = [];
+  cases.forEach(([key, r, opts]) => {
+    const pack = enginePack(key, [r], opts);
+    const bd = DP.bound(pack.items, pack.container);
+    assert.ok(bd.boxes >= pack.totals.loadedCount,
+      key + ' 上界 ' + bd.boxes + ' 低于实得 ' + pack.totals.loadedCount);
+    if (bd.boxes === pack.totals.loadedCount) tight.push(pack.totals.loadedCount);
+  });
+  assert.ok(tight.indexOf(90) >= 0, '斜顶那单应能标「已证明最优」，实际 tight=' + tight.join(','));
 });
 
 // ---------- 硬基准 ----------
