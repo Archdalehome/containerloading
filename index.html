@@ -126,13 +126,17 @@
     </div>
   </section>
 
-  <!-- 使用说明 -->
+  <!-- 使用说明：默认收起，点标题展开；展开状态记在 localStorage -->
   <section class="card" id="help-card">
-    <div class="card-head">
-      <h2>使用说明</h2>
-      <span class="hint">先说清口径，免得把保守估算当成最优解</span>
-    </div>
-    <div class="help-grid">
+    <button type="button" class="help-toggle" id="help-toggle" aria-expanded="false" aria-controls="help-body">
+      <span class="help-toggle-title">使用说明 · 口径与已知限制</span>
+      <span class="help-toggle-hint">先说清口径，免得把保守估算当成最优解</span>
+      <span class="help-toggle-arrow" aria-hidden="true">▾</span>
+    </button>
+    <div class="help-body" id="help-body" hidden>
+    <details class="help-seg">
+      <summary>三档前提（先看这个）</summary>
+      <div class="help-grid">
       <div class="help-item">
         <h3>怎么用</h3>
         <p>选集装箱规格（内置 20GP / 40GP / 40HQ / 45HQ，参数可改）→ 加纸箱行，选形状、填尺寸与数量 → 点「计算装柜」。
@@ -145,6 +149,11 @@
           <b>需配箱 M 个</b>：用刚好塞进缺口的配套箱（尺寸 W低×(H高−H低)×L）代替垫块，能多装货，但要多发这款货。<br>
           带前提的方案都会在方案条上标出来，勾了对应开关才会当「最优」。</p>
       </div>
+      </div>
+    </details>
+    <details class="help-seg">
+      <summary>方案条怎么读</summary>
+      <div class="help-grid">
       <div class="help-item">
         <h3>方案条怎么读</h3>
         <p>每次计算会跑 48 个方案（姿态 4 × 填缺口方式 2 × 排序 3 × 填缝 2；输入大时按规模降到 24 / 12 个）。
@@ -155,6 +164,11 @@
         <p><b>旧版那组「混装 500 箱」物理上装不出来</b>（层层压在斜顶斜面 / L 形缺口空腔上），正确值是 <b>340</b>。
           看到旧截图或旧记录请按 340 理解，不是退步。</p>
       </div>
+      </div>
+    </details>
+    <details class="help-seg">
+      <summary>口径与细节</summary>
+      <div class="help-grid">
       <div class="help-item">
         <h3>非矩形箱按外接长方体占位</h3>
         <p>L 形箱、斜顶箱的净体积按真实几何计算，但排布时用它的外接长方体占位（保守估算），
@@ -222,6 +236,18 @@
           不是 0 时会写明第几层哪一箱、哪个坐标差多少——把那一栏截图发过来就能直接定位，
           不用再复述参数。</p>
       </div>
+      </div>
+    </details>
+    <details class="help-seg">
+      <summary>已知限制</summary>
+      <ul class="help-limits">
+        <li>一层一个主箱型，层内余缝才跨 SKU 填；不做三维任意摆放。</li>
+        <li>L 形台阶缺口只能靠别的箱子或垫块填，同款 L 互相填会穿插（几何上无解）。</li>
+        <li>载重要靠单箱重量，没填重量只能算体积，载重界记为「未约束」。</li>
+        <li>上界是放宽后的估计：差距为 0 才标「已证明最优」，否则「差距 N 箱（受放宽影响）」。</li>
+        <li>侧躺互补块已评估未做：密度 0.1114 低于竖直对扣 0.1133，见 RELEASE.md。</li>
+      </ul>
+    </details>
     </div>
   </section>
 
@@ -246,6 +272,7 @@
 <script src="js/ui/health.js"></script>
 <script src="js/ui/diag.js"></script>
 <script src="js/ui/export-csv.js"></script>
+<script src="js/ui/help.js"></script>
 <script src="js/app.js"></script>
 <script type="module" src="js/ui/viewer.js"></script>
 </body>

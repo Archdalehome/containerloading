@@ -1120,6 +1120,67 @@ try {
   console.log('  两种状态截图：' + OUT_PNG.replace('.png', '-done.png') + ' / ' + OUT_PNG.replace('.png', '-partial.png'));
 
   // 汇总
+  // ---- 使用说明折叠条（放在所有结果截图之后，这里会刷新页面）----
+  const hstep = (name, ok, detail) => result.steps.push({ name, ok: !!ok, detail: detail || '' });
+  await cdp.evaluate("try{localStorage.removeItem('cl.help.open')}catch(e){}; true");
+  await cdp.evaluate("location.reload(); true");
+  await sleep(1600);
+  const helpState = await cdp.evaluate(`(() => {
+    const b = document.getElementById('help-toggle');
+    const body = document.getElementById('help-body');
+    return {
+      hidden: body ? body.hidden : null,
+      expanded: b ? b.getAttribute('aria-expanded') : null,
+      controls: b ? b.getAttribute('aria-controls') : null,
+      tag: b ? b.tagName.toLowerCase() : null
+    };
+  })()`);
+  hstep('使用说明默认收起（button + aria-controls，首次访问不看 localStorage）',
+    !!helpState && helpState.hidden === true && helpState.expanded === 'false' &&
+      helpState.tag === 'button' && helpState.controls === 'help-body',
+    JSON.stringify(helpState));
+
+  const helpShot = async (name) => {
+    const r = await cdp.evaluate(`(() => {
+      const el = document.getElementById('help-card');
+      el.scrollIntoView({ block: 'center' });
+      const b = el.getBoundingClientRect();
+      return { x: 0, y: Math.max(0, Math.round(b.top + window.scrollY) - 12),
+               width: WIDTH, height: Math.min(Math.round(b.height) + 24, 2600) };
+    })()`.replace('WIDTH', String(WIDTH)));
+    await sleep(350);
+    const s2 = await cdp.send('Page.captureScreenshot', {
+      format: 'png', captureBeyondViewport: true,
+      clip: { x: r.x, y: r.y, width: r.width, height: r.height, scale: 1 }
+    });
+    fs.writeFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), name), Buffer.from(s2.data, 'base64'));
+  };
+  await helpShot('screenshot-help-closed.png');
+
+  await cdp.evaluate("document.getElementById('help-toggle').click(); true");
+  await sleep(300);
+  const openState = await cdp.evaluate(`(() => {
+    const b = document.getElementById('help-toggle');
+    const body = document.getElementById('help-body');
+    return { hidden: body.hidden, expanded: b.getAttribute('aria-expanded'),
+             segs: document.querySelectorAll('#help-body details.help-seg').length,
+             stored: (() => { try { return localStorage.getItem('cl.help.open'); } catch (e) { return null; } })() };
+  })()`);
+  hstep('点击后展开、aria-expanded=true、分段可折叠且状态入库',
+    openState.hidden === false && openState.expanded === 'true' && openState.segs >= 4 && openState.stored === '1',
+    JSON.stringify(openState));
+  await helpShot('screenshot-help-open.png');
+
+  await cdp.evaluate("document.getElementById('help-toggle').click(); true");
+  await sleep(250);
+  const closeState = await cdp.evaluate(`(() => {
+    const b = document.getElementById('help-toggle');
+    return { hidden: document.getElementById('help-body').hidden, expanded: b.getAttribute('aria-expanded'),
+             stored: (() => { try { return localStorage.getItem('cl.help.open'); } catch (e) { return null; } })() };
+  })()`);
+  hstep('再点收起、aria-expanded=false',
+    closeState.hidden === true && closeState.expanded === 'false', JSON.stringify(closeState));
+
   const stepFailed = result.steps.filter((s) => !s.ok).length;
   const geomFailed = (geomOk.lshape ? 0 : 1) + (geomOk.slope ? 0 : 1);
   failed = stepFailed + geomFailed;
