@@ -199,6 +199,8 @@ const meshes = new Map();
 function syncMesh(b) {
   let m = meshes.get(b.uid);
   if (!m) { m = meshFor(b); meshes.set(b.uid, m); scene.add(m); }
+  // 旋转会换姿态矩阵，几何必须跟着换；只改位置会让箱子“看着没转”
+  m.geometry = geoFor(b.skuId, b.pose);
   m.position.copy(toScene(b.x + b.l / 2, b.z + b.h / 2, b.y + b.w / 2));
   return m;
 }
@@ -238,6 +240,11 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   say('拖动中…');
 });
 
+function containerXY(mesh, b) {
+  return { x: mesh.position.x + L / 2 - b.l / 2, y: mesh.position.z + W / 2 - b.w / 2 };
+}
+const SNAP_TOL = 100;   // 吸附容差：越大越“粘”，100mm 时靠近墙角就有感觉
+
 renderer.domElement.addEventListener('pointermove', (ev) => {
   if (!dragging) return;
   setPointer(ev);
@@ -246,19 +253,30 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
   const d = p.clone().sub(dragging.grab);
   dragging.mesh.position.add(d);
   dragging.grab.copy(p);
+
+  // 拖动中就吸附：先算出吸附后的位置，把幽灵摆过去，用户松手前就能看到会贴到哪
+  const cand = Object.assign({}, dragging.start, containerXY(dragging.mesh, dragging.start));
+  const others = model.boxes.filter((b) => b.uid !== dragging.uid);
+  const sn = CL.manual.snap(cand, others, c, SNAP_TOL);
+  dragging.snapped = sn.box;
+  dragging.mesh.position.set(
+    sn.box.x + sn.box.l / 2 - L / 2,
+    dragging.mesh.position.y,
+    sn.box.y + sn.box.w / 2 - W / 2
+  );
 });
 
 renderer.domElement.addEventListener('pointerup', (ev) => {
   if (!dragging) return;
   const { uid, mesh, start } = dragging;
+  const snappedBox = dragging.snapped;
   dragging = null;
   mesh.material = mat;
-  // 场景坐标 → 柜内坐标（用箱心反推左下角）
-  const cx = mesh.position.x + L / 2 - start.l / 2;
-  const cy = mesh.position.z + W / 2 - start.w / 2;
+  // 落位用拖动中已经算好的吸附位置（没有就现场再算一次），再交给 tryPlace 做沉降与判定
+  const base = snappedBox || Object.assign({}, start, containerXY(mesh, start));
   const res = CL.manual.tryPlace(
-    { skuId: start.skuId, x: cx, y: cy, z: start.z, l: start.l, w: start.w, h: start.h, pose: start.pose },
-    model.boxes.filter((b) => b.uid !== uid), c, itemsById
+    { skuId: start.skuId, x: base.x, y: base.y, z: start.z, l: start.l, w: start.w, h: start.h, pose: start.pose },
+    model.boxes.filter((b) => b.uid !== uid), c, itemsById, { tol: SNAP_TOL }
   );
   if (!res.ok) {
     syncMesh(start);                     // 先回弹到原位，再报原因
@@ -526,7 +544,25 @@ function renderSkuList() {
   });
 }
 
-/** 往柜里加一只：先过门高，再由模型做沉降/吸附/判定 */
+/** 在柜里找一个真正放得下的空位（先低后高、先近门后往里），不再一律扔到 (0,0,0) */
+function findSpot(it) {
+  const stepX = Math.max(50, Math.round(it.bbox.l / 2));
+  const stepY = Math.max(50, Math.round(it.bbox.w / 2));
+  let tries = 0;
+  for (let x = 0; x + it.bbox.l <= c.innerL + 0.5; x += stepX) {
+    for (let y = 0; y + it.bbox.w <= c.innerW + 0.5; y += stepY) {
+      if (++tries > 600) return null;
+      const r = CL.manual.tryPlace(
+        { skuId: it.id, x, y, z: 0, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h },
+        model.boxes, c, itemsById
+      );
+      if (r.ok) return r;
+    }
+  }
+  return null;
+}
+
+/** 往柜里加一只：先过门高，再找空位，最后由模型做沉降/吸附/判定 */
 function addOne(skuId) {
   const it = itemsById[skuId];
   if (!it) return;
@@ -534,12 +570,14 @@ function addOne(skuId) {
     say('放不进：箱高 ' + Math.round(it.bbox.h) + 'mm 超过 ' + ctnSel.value + ' 门高 ' + c.doorH + 'mm', true);
     return;
   }
-  const r = CL.manualModel.add(model, { skuId, x: 0, y: 0, z: 0, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h });
+  const spot = findSpot(it);
+  if (!spot) { say('放不进：柜内已没有能放下 ' + it.name + ' 的空位', true); return; }
+  const r = CL.manualModel.add(model, { skuId, x: spot.box.x, y: spot.box.y, z: spot.box.z, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h });
   if (!r.ok) { say('放不进：' + (r.message || r.reason), true); return; }
   selected = r.box.uid;
   currentSku = it.id;
   refreshAll();
-  say('已放入一只 ' + it.name + '，共 ' + model.boxes.length + ' 只');
+  say('已放入一只 ' + it.name + '（x=' + Math.round(r.box.x) + ' y=' + Math.round(r.box.y) + '），共 ' + model.boxes.length + ' 只');
 }
 
 function paintForm() {

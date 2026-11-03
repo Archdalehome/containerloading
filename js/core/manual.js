@@ -179,8 +179,9 @@
   /** 旋转后固定顺序：旋转 → 重新沉降 → 判定；不合法就返回原姿态 */
   function rotateAndPlace(box, placed, c, itemsById, axis, opts) {
     var rotated = rotate90(box, axis);
-    rotated.x = box.x;
-    rotated.y = box.y;
+    // 原地绕轴转：保持箱心在水平方向不动，否则箱子会“跑位”（往 +x/+y 长出去）
+    rotated.x = box.x + (box.l - rotated.l) / 2;
+    rotated.y = box.y + (box.w - rotated.w) / 2;
     rotated.z = box.z;
     var res = tryPlace(rotated, placed, c, itemsById, opts);
     if (!res.ok) return { ok: false, reason: res.reason, message: res.message, box: box };
