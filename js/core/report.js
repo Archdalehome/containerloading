@@ -52,10 +52,15 @@
   function poseLabel(p) {
     if (p.kind === 'pair-upper') return '倒放（对扣上件，翻转 180°）';
     if (p.kind === 'pair-lower') return '正放（对扣下件）';
-    if (p.kind === 'fill') return '填缝（正放）';
     if (p.kind === 'side') return '侧放';
     if (p.kind === 'flip') return '倒放';
-    if (p.pose && p.pose[8] === -1) return '倒放';
+    // 默认不限方向后，同一层里可能有正放 / 侧放 / 倒放混排（填缝、换姿态填条带的箱子），
+    // 一律按姿态矩阵判断，不再按 kind 猜
+    if (p.pose) {
+      if (Math.abs(p.pose[8]) < 0.5) return '侧放';
+      if (p.pose[8] === -1) return '倒放（顶面朝下）';
+      return '正放';
+    }
     return '正放';
   }
 

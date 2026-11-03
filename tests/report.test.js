@@ -92,6 +92,25 @@ test('明细里姿态写明清放/倒放/侧放', () => {
   assert.ok(seen.size >= 1, '没有任何姿态');
 });
 
+test('侧放的箱子在明细里写成「侧放」，条数与实际一致', () => {
+  // 100×100×2000 只有侧放才装得进去，姿态矩阵 pose[8]=0
+  const s = state([
+    { id: 'h', shape: 'rect', name: '高箱', values: { L: '100', W: '100', H: '2000' }, qty: '3000', weight: '', allowSide: true, allowFlip: true }
+  ]);
+  const p = P.run(s);
+  const sideCount = p.placements.filter((x) => Math.abs(x.pose[8]) < 0.5).length;
+  assert.ok(sideCount > 0, '没有出现侧放件');
+  const c2 = R.buildCsv(p, s, { now: now });
+  const rows2 = c2.replace(/^\uFEFF/, '').split('\r\n');
+  const start = rows2.findIndex((l) => l.startsWith('逐箱明细'));
+  let csvSide = 0;
+  for (let i = start + 2; i < rows2.length; i++) {
+    if (!rows2[i]) continue;
+    if (rows2[i].split(',')[6] === '侧放') csvSide++;
+  }
+  assert.strictEqual(csvSide, sideCount, '明细里侧放 ' + csvSide + ' 箱，实际 ' + sideCount + ' 箱');
+});
+
 test('名字里有逗号时会被引号包住', () => {
   const s2 = state([{ id: 'x', shape: 'rect', name: 'A,B 箱', values: { L: '400', W: '300', H: '300' }, qty: '2', weight: '5' }]);
   const p2 = P.run(s2);
