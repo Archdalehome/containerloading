@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>手动装柜原型 · 拖放与吸附</title>
+<style>
+  body { margin: 0; background: #0f172a; color: #e2e8f0; font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; }
+  #hud { position: fixed; left: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82); padding: 10px 14px; border-radius: 10px; }
+  #hud b { color: #7dd3fc; }
+  #status { position: fixed; left: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82); padding: 8px 14px; border-radius: 10px; min-width: 260px; }
+  #status.bad { background: rgba(127,29,29,.9); }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="hud">手动装柜原型 · 拖一只箱子：松手会<b>沉降 + 吸附</b>，越界或重叠会<b>回弹</b>并写明原因</div>
+<div id="status">状态：待拖动</div>
+<script src="js/core/shapes.js"></script>
+<script src="js/core/containers.js"></script>
+<script src="js/core/solid.js"></script>
+<script src="js/core/pack.js"></script>
+<script src="js/core/manual.js"></script>
+<script type="module">
+import * as THREE from './vendor/three.module.min.js';
+
+const c = CL.containers.get('40HQ');
+const statusEl = document.getElementById('status');
+const say = (msg, bad) => {
+  statusEl.textContent = '状态：' + msg;
+  statusEl.className = bad ? 'bad' : '';
+};
+
+// ---- 场景 ----
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 10, 80000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const L = c.innerL, H = c.innerH, W = c.innerW;
+const origin = new THREE.Vector3(-L / 2, 0, -W / 2);
+const toScene = (x, y, z) => new THREE.Vector3(x - L / 2, y, z - W / 2);
+
+// 柜体线框 + 地平面
+const box = new THREE.Box3(new THREE.Vector3(-L / 2, 0, -W / 2), new THREE.Vector3(L / 2, H, W / 2));
+scene.add(new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(L, H, W)),
+  new THREE.LineBasicMaterial({ color: 0x38bdf8 })
+).translateY(H / 2));
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(L, W),
+  new THREE.MeshBasicMaterial({ color: 0x1e293b, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.copy(toScene(L / 2, 0, W / 2));
+floor.name = 'floor';
+scene.add(floor);
+
+// 两只箱子（手动模型里的数据才是真的，这里只是渲染）
+const items = [
+  { id: 'a', shape: 'rect', name: '箱A', qty: 99, bbox: { l: 400, w: 300, h: 300 }, shapeValues: { l: 400, w: 300, h: 300 } }
+];
+const model = CL.manualModel.create(items, c);
+const itemsById = { a: items[0] };
+
+const geo = new THREE.BoxGeometry(400, 300, 300);
+const mat = new THREE.MeshLambertMaterial({ color: 0x2563eb, transparent: true, opacity: 0.92 });
+const ghostMat = new THREE.MeshLambertMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.55 });
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.1));
+
+function meshFor(b) {
+  const m = new THREE.Mesh(geo, mat);
+  m.userData.uid = b.uid;
+  m.position.copy(toScene(b.x + b.l / 2, b.z + b.h / 2, b.y + b.w / 2));
+  return m;
+}
+const meshes = new Map();
+function syncMesh(b) {
+  let m = meshes.get(b.uid);
+  if (!m) { m = meshFor(b); meshes.set(b.uid, m); scene.add(m); }
+  m.position.copy(toScene(b.x + b.l / 2, b.z + b.h / 2, b.y + b.w / 2));
+  return m;
+}
+
+// 相机：斜上方看整柜
+camera.position.set(L * 0.85, H * 2.6, W * 3.2);
+camera.lookAt(0, H / 2, 0);
+
+// ---- 拖放 ----
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const dragPlaneHits = [];
+let dragging = null;   // { uid, mesh, start, offset }
+let ghostPos = null;
+
+function setPointer(ev) {
+  pointer.x = (ev.clientX / innerWidth) * 2 - 1;
+  pointer.y = -(ev.clientY / innerHeight) * 2 + 1;
+}
+
+function groundHit() {
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects([floor, ...meshes.values()], false);
+  return hits.length ? hits[0].point : null;
+}
+
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  setPointer(ev);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects([...meshes.values()], false);
+  if (!hits.length) return;
+  const uid = hits[0].object.userData.uid;
+  const b = model.boxes.find((x) => x.uid === uid);
+  dragging = { uid, mesh: hits[0].object, start: b, grab: hits[0].point.clone() };
+  hits[0].object.material = ghostMat;
+  renderer.domElement.setPointerCapture(ev.pointerId);
+  say('拖动中…');
+});
+
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  if (!dragging) return;
+  setPointer(ev);
+  const p = groundHit();
+  if (!p) return;
+  const d = p.clone().sub(dragging.grab);
+  dragging.mesh.position.add(d);
+  dragging.grab.copy(p);
+});
+
+renderer.domElement.addEventListener('pointerup', (ev) => {
+  if (!dragging) return;
+  const { uid, mesh, start } = dragging;
+  dragging = null;
+  mesh.material = mat;
+  // 场景坐标 → 柜内坐标（用箱心反推左下角）
+  const cx = mesh.position.x + L / 2 - start.l / 2;
+  const cy = mesh.position.z + W / 2 - start.w / 2;
+  const res = CL.manual.tryPlace(
+    { skuId: start.skuId, x: cx, y: cy, z: start.z, l: start.l, w: start.w, h: start.h, pose: start.pose },
+    model.boxes.filter((b) => b.uid !== uid), c, itemsById
+  );
+  if (!res.ok) {
+    syncMesh(start);                     // 先回弹到原位，再报原因
+    say(res.reason === 'bounds' ? '放不下：' + res.message : '放不下：' + res.message, true);
+    return;
+  }
+  model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign(res.box, { uid }) : b));
+  syncMesh(model.boxes.find((b) => b.uid === uid));
+  const snapped = res.snaps && res.snaps.length
+    ? '，已贴齐 ' + res.snaps.map((s) => s.axis.toUpperCase() + (s.delta > 0 ? '+' : '') + Math.round(s.delta) + 'mm').join(' / ')
+    : '';
+  say('已落位：x=' + Math.round(res.box.x) + ' y=' + Math.round(res.box.y) + ' z=' + Math.round(res.box.z) + snapped);
+});
+
+function tick() {
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// 便于自检：直接把一只箱子喂进去
+window.__PROTO = {
+  model,
+  drop(skuId, x, y, z) {
+    const it = itemsById[skuId];
+    const b = { skuId, x, y, z, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h };
+    const res = CL.manual.tryPlace(b, model.boxes, c, itemsById);
+    if (res.ok) {
+      res.box.uid = model.nextId++;
+      model.boxes.push(res.box);
+      syncMesh(res.box);
+    }
+    return { ok: res.ok, reason: res.reason, box: res.box };
+  }
+};
+// 初始给一只箱子，打开就能拖
+window.__PROTO.drop('a', 0, 0, 0);
+</script>
+</body>
+</html>
