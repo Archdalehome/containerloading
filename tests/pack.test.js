@@ -674,8 +674,8 @@ test('同款箱换姿态填条带：箱数只增不减，且不越界、不重�
         r.allowFlip = false;
         return r;
       };
-      const withStrip = P.run(state(C.get('40HQ'), [mkRow()]));
-      const noStrip = P.run({ container: C.get('40HQ'), rows: [mkRow()], options: { noStripFill: true } });
+      const withStrip = P.runGreedy(state(C.get('40HQ'), [mkRow()]));
+      const noStrip = P.runGreedy({ container: C.get('40HQ'), rows: [mkRow()], options: { noStripFill: true } });
       const tag = d.join('×') + (side ? ' 侧放开' : ' 侧放关');
       assert.ok(withStrip.totals.loadedCount >= noStrip.totals.loadedCount,
         tag + ' 加条带填缝后变少了：' + noStrip.totals.loadedCount + ' → ' + withStrip.totals.loadedCount);
@@ -704,7 +704,7 @@ test('缺口嵌合：L 形台阶上能塞进小箱，且不悬空', () => {  con
     row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 200, '', 'lshape'),
     row('s', { L: '200', W: '150', H: '200' }, 2000, '', 'rect')
   ];
-  const r = P.run(state(C.get('40HQ'), rows, false));
+  const r = P.runGreedy(state(C.get('40HQ'), rows, false));
   const notch = r.placements.filter((p) => p.kind === 'notch');
   assert.ok(notch.length > 0, '缺口里没有嵌合箱');
   assert.ok(notch.every((p) => p.z > 0), '嵌合箱应落在台阶高度上');
@@ -726,8 +726,8 @@ test('填缝：1680 满高后还能塞进 200×200×300 小箱，且箱数只增
     row('a', { L: '400', W: '300', H: '300' }, 1680),
     row('b', { L: '200', W: '200', H: '300' }, 300)
   ];
-  const without = P.run(state(C.get('40HQ'), rows, false));
-  const withFill = P.run(state(C.get('40HQ'), rows, true));
+  const without = P.runGreedy(state(C.get('40HQ'), rows, false));
+  const withFill = P.runGreedy(state(C.get('40HQ'), rows, true));
   assert.strictEqual(without.totals.loadedCount, 1680, '不填缝时小箱进不去');
   assert.strictEqual(withFill.totals.loadedCount, 1980, '填缝后 +300');
   assert.ok(withFill.totals.loadedCount >= without.totals.loadedCount, '非劣');
@@ -741,8 +741,8 @@ test('填缝不会挤掉更大的箱型（非劣性）', () => {
     row('a', { L: '400', W: '300', H: '300' }, 600),
     row('b', { L: '200', W: '200', H: '250' }, 2000)
   ];
-  const without = P.run(state(C.get('40HQ'), rows, false));
-  const withFill = P.run(state(C.get('40HQ'), rows, true));
+  const without = P.runGreedy(state(C.get('40HQ'), rows, false));
+  const withFill = P.runGreedy(state(C.get('40HQ'), rows, true));
   assert.ok(withFill.totals.loadedCount >= without.totals.loadedCount,
     '填缝后反而变少：' + without.totals.loadedCount + ' → ' + withFill.totals.loadedCount);
   assertNoOverlap(withFill, '填缝非劣');
@@ -998,6 +998,26 @@ BASELINES.forEach((b) => {
     console.log('      ' + b.name + '：当前 ' + ps.best.boxes + ' 箱 / 基线 ' + b.want +
       ' 箱 / 差额 ' + (delta >= 0 ? '+' : '') + delta +
       (delta > 0 ? '  ← 比基线多 ' + delta + ' 箱，可以提基线了' : ''));
+  });
+});
+
+console.log('\n入口收敛（同一输入不能出现两个数）');
+
+test('run() 的箱数必须等于 runPlans() 最优：谁接到哪个入口都不会更差', () => {
+  const cases = [
+    [row('a', { L: '400', W: '300', H: '300' }, 5000)],
+    [row('a', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 300, '', 'lshape')],
+    [row('a', { L: '600', W: '400', Hlow: '300', Hhigh: '500' }, 300, '', 'slope')],
+    [
+      row('a', { L: '770', W: '700', Wlow: '350', Whigh: '350', Hlow: '450', Hhigh: '800' }, 130, '', 'lshape'),
+      row('b', { L: '700', W: '700', Hlow: '300', Hhigh: '600' }, 190, '', 'slope')
+    ]
+  ];
+  cases.forEach((rows, i) => {
+    const st = state(C.get('40HQ'), rows, false);
+    const a = P.run(st).totals.loadedCount;
+    const b = P.runPlans(st).best.boxes;
+    assert.strictEqual(a, b, '第 ' + (i + 1) + ' 组入口不一致：run ' + a + ' vs runPlans ' + b);
   });
 });
 

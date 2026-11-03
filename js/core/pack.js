@@ -169,6 +169,8 @@
     var bestTotal = -1;
     // 斜顶侧放后顶面是楔形：自己站着还行，但上面那层没法整面贴合，会把后面的层全堵死。
     // 所以斜顶只在「立着放根本放不进」时才考虑侧放。
+    // （这是贪心主循环的启发式；层型最优方案 runExact 不受它限制，侧放斜顶要在那里参与比较。
+    //   等 2 箱块枚举接上，这段也一并删掉，让采样统一回答。）
     if (item.shape === 'slope') {
       var uprightOnly = poses.filter(function (p) { return !p.side && !p.flip; });
       if (uprightOnly.length) poses = uprightOnly;
@@ -583,7 +585,7 @@
 
   /* ---------- 主流程 ---------- */
 
-  function run(state) {
+  function runGreedy(state) {
     var c = parseContainer(state.container || {});
     var opts = state.options || {};
     var allowFill = !!opts.allowFill;
@@ -1737,7 +1739,7 @@
           allowSide: cfg.policy.allowSide && r.allowSide !== false
         });
       });
-      var pack = run({
+      var pack = runGreedy({
         container: state.container || {},
         rows: rows,
         options: {
@@ -1808,8 +1810,32 @@
     };
   }
 
+  /**
+   * 统一入口：所有方案里最好的那个。
+   *
+   * 以前 run() = 贪心主循环、runPlans() = 48 个贪心方案 + 1 个层型最优，
+   * 同一份输入两个入口给两个数（用户那单 run 给 162、runPlans 给 210）。
+   * 现在 run() 直接取 runPlans().best，谁接到哪个入口都不会拿到更差的结果；
+   * 贪心部分改名 runGreedy() 只作内部实现，不再对外。
+   */
+  function run(state) {
+    var ps = runPlans(state);
+    var best = (ps && (ps.best || (ps.ranked && ps.ranked[0]))) || null;
+    if (best && best.pack) {
+      best.pack.chosen = {
+        label: best.config && best.config.label,
+        key: best.config && best.config.key,
+        compared: ps.compared
+      };
+      return best.pack;
+    }
+    return runGreedy(state);
+  }
+
   NS.pack = {
     run: run,
+    // 只给测试用的内部实现：条带填缝、缺口嵌合这些机制要单独验，不能拿「最优方案」去验
+    runGreedy: runGreedy,
     runPlans: runPlans,
     planConfigs: planConfigs,
     cogOf: cogOf,
