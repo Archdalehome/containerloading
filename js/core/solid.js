@@ -62,15 +62,22 @@
   /**
    * p 这一箱在容器水平位置 (X, Y) 上的实体高度区间 [下沿, 上沿]。
    * 该位置不在箱体投影内时返回 null。X、Y 用容器坐标（mm）。
+   *
+   * 通用求交：竖直方向在本体坐标系里永远是**某一根局部轴**（矩阵是带符号的置换阵），
+   * 所以先算出这根轴 a 与另外两根轴的固定坐标，再把「实体 = 局部 z ≤ limit(x,y)」
+   * 这个约束投影到 a 上：
+   *   a = 2（竖轴就是箱高）  → 竖直区间 [0, limit(x,y)]，limit 随 (x,y) 变
+   *   a = 0（箱子躺下，长度朝上）→ 局部 z 固定：先要求 z ≤ limit，再看 limit 依赖谁
+   *   a = 1（宽度朝上）        → 同理
+   * 以前这里用「竖轴是不是局部高度轴」分流，侧躺时直接取该轴全长，等于把 L 形/斜顶箱
+   * 当成实心长方体——侧躺旁边的楔形空隙在判定里根本不存在。
    */
   function spanAt(p, item, X, Y) {
     var d = dimsOf(item);
     if (!Number.isFinite(d[0]) || !Number.isFinite(d[1]) || !Number.isFinite(d[2])) return null;
     var m = p.pose || IDENT;
 
-    var av = -1;
-    var ax = -1;
-    var ay = -1;
+    var av = -1, ax = -1, ay = -1;
     for (var a = 0; a < 3; a++) {
       if (Math.abs(m[2 * 3 + a]) > 0.5) av = a;
       if (Math.abs(m[0 * 3 + a]) > 0.5) ax = a;
@@ -78,7 +85,7 @@
     }
     if (av < 0 || ax < 0 || ay < 0 || ax === ay || ax === av || ay === av) return null;
 
-    // 容器坐标 → 该箱局部「从底面/左侧算起」的坐标（0..d）
+    // 局部坐标：水平两根轴由 (X,Y) 定，第三根（竖轴）待求
     var cx = X - (p.x + p.l / 2);
     var cy = Y - (p.y + p.w / 2);
     var fb = [0, 0, 0];
@@ -87,14 +94,59 @@
     if (fb[ax] < -EPS || fb[ax] > d[ax] + EPS) return null;
     if (fb[ay] < -EPS || fb[ay] > d[ay] + EPS) return null;
 
-    // 竖直方向上的实体长度：竖轴就是箱高时按截面轮廓取，侧放时取该轴全长
-    var lim = av === 2 ? limitAt(item, fb[0], fb[1]) : d[av];
-    if (!(lim > EPS)) return null;
+    var lo = 0;      // 竖轴局部坐标的允许下界
+    var hi = d[av];  // 上界
+
+    if (av === 2) {
+      // 竖轴就是箱高：区间从 0 到该列的截面高度
+      hi = Math.min(hi, limitAt(item, fb[0], fb[1]));
+    } else {
+      // 竖轴是局部 x 或 y：局部 z 固定，先把它从容器坐标算出来，再查 z 是否在实体内
+      var az = -1;
+      for (var r2 = 0; r2 < 3; r2++) {
+        if (Math.abs(m[r2 * 3 + 2]) > 0.5) az = r2;
+      }
+      if (az === 0) fb[2] = m[0 * 3 + 2] * cx + d[2] / 2;
+      else if (az === 1) fb[2] = m[1 * 3 + 2] * cy + d[2] / 2;
+      else return null;
+      var lz = fb[2];
+      if (lz < -EPS || lz > d[2] + EPS) return null;
+      if (item.shape === 'lshape') {
+        var svL = item.shapeValues;
+        if (lz > svL.hhigh + EPS) return null;
+        if (av === 1) {
+          // 竖轴 = 局部 y：低段（y ≤ W低）只到 H低，高段从 W低 起才有料
+          if (lz > svL.hlow + EPS) lo = Math.max(lo, svL.wlow);
+        } else {
+          // 竖轴 = 局部 x：y 固定，看这一列的台阶高度够不够
+          var yFixed = fb[1];
+          var limY = yFixed <= svL.wlow + EPS ? svL.hlow : svL.hhigh;
+          if (lz > limY + EPS) return null;
+        }
+      } else if (item.shape === 'slope') {
+        var sv = item.shapeValues;
+        var delta = sv.hhigh - sv.hlow;
+        if (lz > sv.hhigh + EPS) return null;
+        if (av === 0) {
+          // 竖轴 = 局部 x：斜面把 x 卡在 [xMin, L]
+          var xMin = delta > EPS ? sv.l * (lz - sv.hlow) / delta : 0;
+          lo = Math.max(lo, Math.min(sv.l, Math.max(0, xMin)));
+        } else {
+          // 竖轴 = 局部 y：x 固定，看斜面高度够不够
+          var limX = sv.hlow + delta * (fb[0] / sv.l);
+          if (lz > limX + EPS) return null;
+        }
+      } else if (lz > d[2] + EPS) {
+        return null;
+      }
+    }
+
+    if (!(hi > lo + EPS)) return null;
 
     var sign = m[2 * 3 + av] > 0 ? 1 : -1;
     var mid = p.z + p.h / 2;
-    var e0 = mid + sign * (0 - d[av] / 2);
-    var e1 = mid + sign * (lim - d[av] / 2);
+    var e0 = mid + sign * (lo - d[av] / 2);
+    var e1 = mid + sign * (hi - d[av] / 2);
     return e0 <= e1 ? [e0, e1] : [e1, e0];
   }
 

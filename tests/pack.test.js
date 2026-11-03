@@ -268,11 +268,13 @@ function baseRow(values, qty, weight, shape) {
   return r;
 }
 
-test('背包在 1820 / 1610 / 460 / 90 四组上和引擎一致', () => {
+test('背包在 1820 / 1610 / 440 / 90 四组上和引擎一致', () => {
   const cases = [
     ['40HQ', baseRow({ L: '400', W: '300', H: '300' }, 5000, '8'), 1820],
     ['40GP', baseRow({ L: '400', W: '300', H: '300' }, 5000, '8'), 1610],
-    ['40GP', baseRow({ L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '9', 'lshape'), 460],
+    // 背包不建垫块模型，所以这组是 440；引擎开了 allowDunnage 才到 460。
+    // 之前这里写 460，是因为 L 形台阶面被当成可叠（面积相加的旧口径），修正 spanAt 后露出来。
+    ['40GP', baseRow({ L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '9', 'lshape'), 440],
     ['40GP', baseRow({ L: '2000', W: '470', Hlow: '410', Hhigh: '900' }, 200, '5', 'slope'), 90]
   ];
   cases.forEach(([key, r, want]) => {
