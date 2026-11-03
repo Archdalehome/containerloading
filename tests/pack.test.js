@@ -862,7 +862,7 @@ const BASELINES = [
   },
   {
     name: '40HQ 610×390×310（同款换姿态填条带）',
-    want: 936,
+    want: 957,
     run: () => {
       const r = row('a', { L: '610', W: '390', H: '310' }, 3000);
       r.allowSide = true; r.allowFlip = true;
@@ -877,7 +877,10 @@ BASELINES.forEach((b) => {
     assert.ok(ps.best.boxes >= b.want,
       b.name + ' 从 ' + b.want + ' 箱掉到 ' + ps.best.boxes + ' 箱（装载率 ' +
       (ps.best.fillRate * 100).toFixed(1) + '%）');
-    console.log('      ' + b.name + '：' + ps.best.boxes + ' 箱（基线 ' + b.want + '）');
+    const delta = ps.best.boxes - b.want;
+    console.log('      ' + b.name + '：当前 ' + ps.best.boxes + ' 箱 / 基线 ' + b.want +
+      ' 箱 / 差额 ' + (delta >= 0 ? '+' : '') + delta +
+      (delta > 0 ? '  ← 比基线多 ' + delta + ' 箱，可以提基线了' : ''));
   });
 });
 
