@@ -1,0 +1,102 @@
+/*
+ * 贴面落位单测：坐落到支撑面（面接触）+ 角对齐 + 零侵入。
+ *   node tests/place-on-face.test.js
+ */
+'use strict';
+
+const assert = require('assert');
+const C = require('../js/core/containers.js');
+const SOLID = require('../js/core/solid.js');
+const L = require('../js/core/corner-link.js');
+
+let pass = 0, fail = 0;
+function test(name, fn) {
+  try { fn(); pass++; console.log('  ok  ' + name); }
+  catch (e) { fail++; console.log('  FAIL ' + name + '\n      ' + e.message); }
+}
+
+const c = C.get('40HQ');
+const rect = (id, l, w, h) => ({ id, shape: 'rect', shapeValues: { l, w, h }, bbox: { l, w, h } });
+const box = (skuId, x, y, z, l, w, h, uid) => ({ skuId, x, y, z, l, w, h, uid: uid || skuId });
+
+console.log('\n贴面落位');
+
+test('悬在 60mm 高处松手：坐到下件顶面，缝 gap=0，面接触 100%', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const a = box('a', 0, 0, 0, 400, 300, 300, 'A1');
+  const b = box('a', 0, 0, 360, 400, 300, 300, 'B1');   // 故意浮 60mm
+  const r = L.placeOnFace(b, [a], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.strictEqual(r.box.z, 300, '必须坐到 300 的面上，实际 ' + r.box.z);
+  assert.strictEqual(r.gap, 0, 'gap 必须是 0，实际 ' + r.gap);
+  assert.strictEqual(r.contact.ratio, 1, '面接触应 100%，实际 ' + r.contact.ratio);
+});
+
+test('水平偏 40mm：角对齐到支撑面的角，残差为 0', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const a = box('a', 0, 0, 0, 400, 300, 300, 'A1');
+  const b = box('a', 37, 28, 320, 400, 300, 300, 'B1');
+  const r = L.placeOnFace(b, [a], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.deepStrictEqual([r.box.x, r.box.y, r.box.z], [0, 0, 300]);
+  assert.ok(r.aligned.moved, '应发生角对齐');
+  assert.deepStrictEqual([r.aligned.dx, r.aligned.dy], [-37, -28]);
+});
+
+test('旁边有更高的箱子：不穿进去，而是站到更高的那一层（零侵入优先）', () => {
+  const items = { a: rect('a', 400, 300, 300), b: rect('b', 400, 300, 600) };
+  const a = box('a', 0, 0, 0, 400, 300, 300, 'A1');
+  const nb = box('b', 0, 400, 0, 400, 300, 600, 'B1');
+  const drop = box('a', 0, 200, 500, 400, 300, 300, 'D1');
+  const r = L.placeOnFace(drop, [a, nb], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.strictEqual(r.box.z, 600, '应抬到 600 而不是压在 300 上穿进 B1，实际 ' + r.box.z);
+  [a, nb].forEach((o) => {
+    const depth = SOLID.overlapDepth(r.box, o, items.a, items.b, 10);
+    assert.ok(depth <= 1, '与 ' + o.uid + ' 侵入 ' + depth.toFixed(1) + 'mm');
+  });
+});
+
+test('对齐后出柜：拒绝', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const a = box('a', c.innerL - 20, 0, 0, 400, 300, 300, 'A1');
+  const drop = box('a', c.innerL - 30, 0, 300, 400, 300, 300, 'D1');
+  const r = L.placeOnFace(drop, [a], c, items, { tol: 150 });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'bounds', '实际 ' + r.reason);
+});
+
+test('脚下什么都没有：落到柜底 z=0', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const b = box('a', 2000, 1000, 800, 400, 300, 300, 'B1');
+  const r = L.placeOnFace(b, [], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.strictEqual(r.box.z, 0);
+  assert.strictEqual(r.floor, true);
+});
+
+test('落位后与所有箱子逐只采样零侵入', () => {
+  const items = { a: rect('a', 400, 300, 300) };
+  const placed = [
+    box('a', 0, 0, 0, 400, 300, 300, 'A1'),
+    box('a', 400, 0, 0, 400, 300, 300, 'A2')
+  ];
+  const drop = box('a', 380, 0, 700, 400, 300, 300, 'D1');
+  const r = L.placeOnFace(drop, placed, c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  placed.forEach((o) => {
+    const depth = SOLID.overlapDepth(r.box, o, items.a, items.a, 10);
+    assert.ok(depth <= 1, '与 ' + o.uid + ' 侵入 ' + depth.toFixed(1) + 'mm');
+  });
+});
+
+test('箱高超过柜门：直接拒绝，不要绕到"没支撑"', () => {
+  const items = { a: rect('a', 400, 300, 2700) };
+  const b = box('a', 0, 0, 0, 400, 300, 2700, 'B1');
+  const r = L.placeOnFace(b, [], c, items, { tol: 150 });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'door-height');
+});
+
+console.log('\n' + pass + ' 通过 / ' + fail + ' 失败\n');
+if (fail) process.exit(1);

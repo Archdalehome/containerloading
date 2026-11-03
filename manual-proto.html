@@ -399,19 +399,25 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   const base = snappedBox || Object.assign({}, start, containerXY(mesh, start));
   const input = { skuId: start.skuId, x: base.x, y: base.y, z: c.innerH, l: start.l, w: start.w, h: start.h, pose: start.pose };
   const others = model.boxes.filter((b) => b.uid !== uid);
-  // 先试「自动对齐某个角」：落点附近 150mm 内有别的箱子（或柜角）的角，就把两个角精确对上。
-  // 这一步是松手的最后一道动作，对齐后仍然要过重叠/支撑/越界校验，过不了就退回普通落位。
+  // 贴面落位：坐到脚下最高的、真托得住底面的那一层，再把底面的一个角对到支撑面的角上，
+  // 最后验零侵入。只点一下（没拖动）就不动箱子。
   const dropZ = (intendedZ !== undefined) ? intendedZ : start.z;
-  const al = moved
-    ? CL.cornerLink.alignOnDrop(Object.assign({}, input, { z: dropZ, uid: uid }), others, c, itemsById, { tol: 150 })
-    : { ok: false };
-  if (al.ok) {
-    model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign(al.box, { uid }) : b));
+  const pf = moved
+    ? CL.cornerLink.placeOnFace(Object.assign({}, input, { z: dropZ, uid: uid }), others, c, itemsById, { tol: 150 })
+    : { ok: false, reason: 'click' };
+  if (pf.ok) {
+    model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign(pf.box, { uid }) : b));
     refreshAll();
-    say('已自动对齐角点：#' + uid + ' 的' + (al.movingKey === 'floor' ? '底角' : '底角') +
-      ' 与 ' + (al.alignedWith === 'floor' ? '柜底角' : '#' + al.alignedWith + ' 的角') +
-      ' 重合，残差 ' + al.residual.dx + ' / ' + al.residual.dy + ' / ' + al.residual.dz +
-      ' mm（应为 0/0/0），z=' + Math.round(al.box.z));
+    say('已落位：' + (pf.floor ? '柜底' : '下层箱面 z=' + Math.round(pf.supportZ)) +
+      '｜面接触 ' + Math.round(pf.contact.ratio * 100) + '%（' + pf.contact.area + 'mm²）' +
+      '｜缝 ' + pf.gap + 'mm' +
+      (pf.aligned.moved ? '｜角对齐 Δx ' + pf.aligned.dx + ' Δy ' + pf.aligned.dy + 'mm' : '｜角已在面上') +
+      '｜与其它箱侵入 0mm');
+    return;
+  }
+  if (moved) {
+    syncMesh(start);                     // 贴不上去就退回原位，再说原因
+    say('放不下：' + pf.message, true);
     return;
   }
   // 拖动过程中已经吸附好了，松手时 **不再** 二次吸附：再吸一次会把它挪开几毫米，
@@ -515,9 +521,9 @@ function paintSelection() {
 }
 
 // 版本标记：直接写在页面上，用来确认浏览器拿到的是不是新版本（缓存了会显示旧时间）
-const BUILD = '2026-11-03 22:35';
+const BUILD = '2026-11-03 22:45';
 const buildEl = document.getElementById('build');
-if (buildEl) buildEl.textContent = 'build ' + BUILD + ' · 拖动松手自动对齐箱角';
+if (buildEl) buildEl.textContent = 'build ' + BUILD + ' · 拖动松手：贴面 + 角对齐 + 验零侵入';
 
 /** 重力结算：自下而上让每只箱子重新落到它当下的支撑面上。
  *  拖走下面那只、删掉一只、转完姿态之后都要跑，否则上面的箱子会悬在空中——违反常识。 */

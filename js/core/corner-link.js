@@ -186,11 +186,105 @@
     return { ok: false, reason: 'no-align', message: '附近 ' + tol + 'mm 内没有可对齐的角' };
   }
 
+  /** 所有可承重的水平面（含柜底 z=0），按高度从高到低 */
+  function levelsDown(placed, itemsById, c) {
+    var byZ = {};
+    (placed || []).forEach(function (p) {
+      var it = itemsById && itemsById[p.skuId];
+      if (!it || !P || !P.surfacesOf) return;
+      P.surfacesOf(it, p).forEach(function (s) {
+        if (s.z <= 0) return;
+        var k = Math.round(s.z * 1000) / 1000;
+        (byZ[k] = byZ[k] || []).push({ x: s.rect.x, y: s.rect.y, l: s.rect.l, w: s.rect.w, owner: p.uid });
+      });
+    });
+    byZ[0] = [{ x: 0, y: 0, l: c.innerL, w: c.innerW, owner: 'floor' }];
+    return Object.keys(byZ).map(Number).sort(function (a, b) { return b - a; })
+      .map(function (z) { return { z: z, rects: byZ[z] }; });
+  }
+
+  /**
+   * 贴面落位：先落到"脚下最高的、真的托得住底面的那一层"，再在这一层里把底面的某个角
+   * 对到支撑面的角上（tol 内），最后验零侵入。
+   *
+   * 为什么要有这一步：只做"沉降"能保证高度对、但水平位置可能差几十毫米；
+   * 只做"角对齐"又可能落到一个并不在脚下的角上，出现悬空或缝。两步合起来才是
+   * 现场的动作——先坐到面上，再推着贴齐一个角。
+   */
+  function placeOnFace(box, placed, c, itemsById, opts) {
+    var tol = (opts && opts.tol !== undefined) ? opts.tol : 150;
+    if (box.h > c.doorH + EPS) {
+      return { ok: false, reason: 'door-height', message: '箱高 ' + Math.round(box.h) + 'mm 超过柜门 ' + c.doorH + 'mm' };
+    }
+    var others = (placed || []).filter(function (o) { return o.uid !== box.uid; });
+    var levels = levelsDown(others, itemsById, c);
+    var foot = { x: box.x, y: box.y, l: box.l, w: box.w };
+    var pick = null;
+    for (var i = 0; i < levels.length; i++) {
+      var lv = levels[i];
+      if (lv.z + box.h > c.innerH + EPS) continue;
+      var bestRect = null, bestArea = 0;
+      lv.rects.forEach(function (r) {
+        var ix = Math.min(foot.x + foot.l, r.x + r.l) - Math.max(foot.x, r.x);
+        var iy = Math.min(foot.y + foot.w, r.y + r.w) - Math.max(foot.y, r.y);
+        if (ix <= 0 || iy <= 0) return;
+        var a = ix * iy;
+        if (a > bestArea) { bestArea = a; bestRect = r; }
+      });
+      if (bestArea >= foot.l * foot.w * SUPPORT_MIN) { pick = { z: lv.z, rect: bestRect, area: bestArea }; break; }
+    }
+    if (!pick) {
+      return { ok: false, reason: 'no-support', message: '脚下没有能托住 ' + Math.round(box.l) + '×' + Math.round(box.w) + 'mm 底面的平面' };
+    }
+    var cand = Object.assign({}, box, { z: pick.z });
+    // 角对齐：底面的 4 个角 vs 支撑面的 4 个角，取位移最小且在 tol 内的那一对
+    var best = null;
+    [[0, 0], [1, 0], [0, 1], [1, 1]].forEach(function (fc) {
+      var fx = cand.x + fc[0] * cand.l, fy = cand.y + fc[1] * cand.w;
+      [[0, 0], [1, 0], [0, 1], [1, 1]].forEach(function (rc) {
+        var rx = pick.rect.x + rc[0] * pick.rect.l, ry = pick.rect.y + rc[1] * pick.rect.w;
+        var dx = rx - fx, dy = ry - fy;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d > tol) return;
+        if (!best || d < best.d) best = { d: d, dx: dx, dy: dy, fc: fc, rc: rc };
+      });
+    });
+    var aligned = { dx: 0, dy: 0, moved: false };
+    if (best) {
+      cand.x += best.dx; cand.y += best.dy;
+      aligned = { dx: r1(best.dx), dy: r1(best.dy), moved: true, corner: best.fc.join('') + '→' + best.rc.join('') };
+    }
+    if (cand.x < -EPS || cand.y < -EPS ||
+        cand.x + cand.l > c.innerL + EPS || cand.y + cand.w > c.innerW + EPS) {
+      return { ok: false, reason: 'bounds', message: '对齐后超出柜内腔', box: cand };
+    }
+    for (var j = 0; j < others.length; j++) {
+      if (M.overlaps(cand, others[j], itemsById)) {
+        return { ok: false, reason: 'overlap', message: '与 #' + others[j].uid + ' 互相侵入', box: cand, with: others[j] };
+      }
+    }
+    // 复核面接触：这一层真正接触到的面积占比
+    var ct = contactAt(cand, others, itemsById);
+    return {
+      ok: true, box: cand,
+      floor: pick.z <= EPS,
+      supportZ: pick.z,
+      contact: {
+        area: Math.round(ct.area),
+        ratio: Math.round(ct.area / (cand.l * cand.w) * 1000) / 1000,
+        floor: ct.floor
+      },
+      aligned: aligned,
+      gap: r1(cand.z - pick.z)          // 必须为 0：说明"坐在面上"，不是浮着
+    };
+  }
+
   NS.cornerLink = {
     cornersOf: cornersOf,
     contactAt: contactAt,
     link: link,
-    alignOnDrop: alignOnDrop
+    alignOnDrop: alignOnDrop,
+    placeOnFace: placeOnFace
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = NS.cornerLink;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
