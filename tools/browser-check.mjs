@@ -278,11 +278,17 @@ function pageTestScript() {
   step('L形箱 20 箱全部装入', secondSkuRow.children[5].textContent.trim() === '20' && secondSkuRow.children[6].textContent.trim() === '0');
   step('分层明细有数据', $$('#result-body .tbl')[1] && $$('tbody tr', $$('#result-body .tbl')[1]).length >= 2);
 
-  // 5. 门高约束：箱高 2600 > 40HQ 门高 2585
-  setField(1, 'Hhigh', '2600');
+  // 5. 门高约束：默认不限方向后 2600 高的箱子能躺下装（只给提示），
+  //    真正被拦的是任何朝向都过不了门高的箱子
+  setField(1, 'L', '4000');
+  setField(1, 'W', '4000');
+  setField(1, 'Wlow', '2000');
+  setField(1, 'Whigh', '2000');
+  setField(1, 'Hlow', '2000');
+  setField(1, 'Hhigh', '4000');
   await calc();
   const doorMsg = $('#result-body').textContent;
-  step('超门高被拦下', $('#result-card').classList.contains('is-error'));
+  step('任何朝向都超门高才被拦下', $('#result-card').classList.contains('is-error'), doorMsg.slice(0, 80));
   step('提示写明门高 2585', doorMsg.includes('门高 2585'), doorMsg.slice(0, 160));
 
   // 6. 切 20GP → 门高 2280
@@ -291,6 +297,11 @@ function pageTestScript() {
   step('切换 20GP 生效', $('#spec-innerL').value === '5898' && $('#spec-doorH').value === '2280', '内长=' + $('#spec-innerL').value + ' 门高=' + $('#spec-doorH').value);
   await calc();
   step('20GP 门高 2280 提示', $('#result-body').textContent.includes('门高 2280'));
+  // 还原成能装的 L 形，后面的用例继续用
+  setField(1, 'L', '600');
+  setField(1, 'W', '400');
+  setField(1, 'Hlow', '300');
+  setField(1, 'Hhigh', '500');
 
   // 7. 数量非法
   setVal($('.qty-input', card(1)), '0');

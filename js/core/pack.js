@@ -737,16 +737,35 @@
         var sv = cand.shapeValues;
         var pairThickness = sv.hlow + sv.h;
         var roomLeft = c.innerH - z;
-        var hup = findNormalPose(cand);
+        // 对扣层也要像普通层一样比较两个水平朝向：770 沿柜长是 15×3=45 个位置，
+        // 转 90° 后 700 沿柜长是 17×3=51 个位置，差 6 个位置 × 层数——之前只取了第一个朝向
+        var pairBest = null;
+        posesFor(cand).forEach(function (pose) {
+          if (pose.flip || pose.vertical !== 2) return;
+          var cap = capacityOf(pose, c);
+          if (cap.cap <= 0) return;
+          if (!pairBest || cap.cap > pairBest.cap.cap) {
+            var flip = findFlipPose(cand, pose);
+            if (flip) pairBest = { lower: pose, upper: flip, cap: cap };
+          }
+        });
+        var hup = pairBest ? pairBest.lower : null;
         if (hup && pairThickness <= roomLeft + EPS && pairThickness <= c.doorH + EPS && cand.remaining >= 2) {
-          var hupCap = capacityOf(hup, c);
-          var flipPose = findFlipPose(cand, hup);
+          var hupCap = pairBest.cap;
+          var flipPose = pairBest.upper;
           if (flipPose && hupCap.cap > 0) {
             var singleTotal = Math.floor((roomLeft + EPS) / candPose.thickness) * posCap.cap;
             var pairLayers = Math.floor((roomLeft + EPS) / pairThickness);
             var pairsPerLayer = Math.min(Math.floor(cand.remaining / 2), hupCap.cap);
             var pairTotal = pairLayers * pairsPerLayer * 2;
-            if (pairTotal >= singleTotal) {
+            // 对扣层上面往往还能再放一层别的姿态（例如 40GP：1 对 1250 + 1 单层 800 = 2050），
+            // 只比「对扣层本身」会漏掉这种组合，所以把上面还能放的也加进来比
+            var afterPair = roomLeft - pairLayers * pairThickness;
+            var abovePose = afterPair > EPS ? bestPose(cand, c, afterPair) : null;
+            var aboveTotal = abovePose
+              ? Math.floor((afterPair + EPS) / abovePose.thickness) * capacityOf(abovePose, c).cap
+              : 0;
+            if (pairTotal + aboveTotal >= singleTotal) {
               pair = {
                 thickness: pairThickness,
                 lower: hup,
@@ -1111,9 +1130,12 @@
     if (!refPose) return null;
     var prof = item.shape === 'lshape' ? 1 : 0;
     var m = refPose.m.slice();
-    for (var a = 0; a < 3; a++) {
-      m[2 * 3 + a] = -m[2 * 3 + a];
-      m[prof * 3 + a] = -m[prof * 3 + a];
+    // 要翻转的是「局部轴」：局部箱高轴（2）和剖面变化轴（L 形是局部深 1、斜顶是局部长 0）。
+    // 矩阵里第 a 列 = 局部轴 a 的像，所以取反列而不是行——取反行会把整个姿态转歪，
+    // 对扣后的两只箱子就会互相插入（350mm 重叠）。
+    for (var r = 0; r < 3; r++) {
+      m[r * 3 + 2] = -m[r * 3 + 2];
+      m[r * 3 + prof] = -m[r * 3 + prof];
     }
     var pose = SOLID.poseFromMatrix(m);
     var dims = poseDims(item, pose);

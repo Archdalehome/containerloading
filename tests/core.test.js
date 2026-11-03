@@ -95,22 +95,29 @@ console.log('\n集装箱约束');
 
 const c40hq = C.get('40HQ');
 
-test('40HQ 门高 2585：2600mm 高箱必须报“门高”错误，而不是笼统说内高不够', () => {
+test('默认不限方向：2600mm 高的箱子能躺下装，只提示换方向', () => {
   const row = { id: 'r1', shape: 'rect', values: { L: '1000', W: '1000', H: '2600' }, qty: '1', weight: '10' };
   const errs = V.rowErrors(row, c40hq);
-  const msg = errs.filter((e) => e.level === 'error').map((e) => e.message).join(' | ');
+  const errors = errs.filter((e) => e.level === 'error').map((e) => e.message).join(' | ');
+  const warns = errs.filter((e) => e.level === 'warn').map((e) => e.message).join(' | ');
+  assert.strictEqual(errors, '', '2600 高躺下能进，不该报错：' + errors);
+  assert.ok(warns.includes('占用'), '应提示换方向后的占用高度，实际：' + warns);
+});
+
+test('任何朝向都放不进才报门高：2700×2700×2700', () => {
+  const row = { id: 'r1', shape: 'rect', values: { L: '2700', W: '2700', H: '2700' }, qty: '1', weight: '10' };
+  const msg = V.rowErrors(row, c40hq).filter((e) => e.level === 'error').map((e) => e.message).join(' | ');
   assert.ok(msg.includes('门高 2585'), '实际：' + msg);
-  assert.ok(!msg.includes('超过 40HQ 内高'), '不应误报内高，实际：' + msg);
 });
 
-test('40HQ 内高 2698：2700mm 高箱报内高错误', () => {
-  const row = { id: 'r1', shape: 'rect', values: { L: '1000', W: '1000', H: '2700' }, qty: '1', weight: '10' };
-  const msg = V.rowErrors(row, c40hq).map((e) => e.message).join(' | ');
-  assert.ok(msg.includes('内高 2698'), '实际：' + msg);
+test('2700mm 高但底面放得下的箱子，允许躺下装（1000 高）', () => {
+  const row = { id: 'r1', shape: 'rect', values: { L: '2700', W: '1000', H: '1000' }, qty: '1', weight: '10' };
+  const errors = V.rowErrors(row, c40hq).filter((e) => e.level === 'error');
+  assert.deepStrictEqual(errors, []);
 });
 
-test('40HQ：底面最短边超过内宽 2352 报错', () => {
-  const row = { id: 'r1', shape: 'rect', values: { L: '3000', W: '2400', H: '500' }, qty: '1', weight: '10' };
+test('两个方向都超过内宽才报错：3000×3000×500', () => {
+  const row = { id: 'r1', shape: 'rect', values: { L: '3000', W: '3000', H: '500' }, qty: '1', weight: '10' };
   const msg = V.rowErrors(row, c40hq).filter((e) => e.level === 'error').map((e) => e.message).join(' | ');
   assert.ok(msg.includes('内宽 2352'), '实际：' + msg);
 });

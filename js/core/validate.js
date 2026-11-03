@@ -92,36 +92,56 @@
     var innerL = toNum(container && container.innerL);
     var heightKey = shape.heightKey || 'H';
 
-    var overInner = Number.isFinite(innerH) && bb.h > innerH + 1e-9;
-    var overDoor = Number.isFinite(doorH) && bb.h > doorH + 1e-9;
-
-    if (overInner) {
-      errs.push({
-        field: heightKey, level: 'error',
-        message: '此箱型高 ' + num(bb.h) + ' mm，超过 ' + cKey + ' 内高 ' + num(innerH) +
-          ' mm（门高 ' + num(doorH) + ' mm），无法装入。'
-      });
-    } else if (overDoor) {
-      // 关键约束：柜内再高也没用，箱体必须先过柜门
-      errs.push({
-        field: heightKey, level: 'error',
-        message: '此箱型高 ' + num(bb.h) + ' mm，超过 ' + cKey + ' 门高 ' + num(doorH) +
-          ' mm，无法通过柜门装入。'
-      });
+    // 默认不限方向：只要「存在一种朝向」能过门、进得去，就不算超尺寸。
+    // 例如 3000×2500×500 立起来是 2500 高、500 宽，40HQ 门高 2585 装得进去。
+    var dims = [bb.l, bb.w, bb.h];
+    var orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    var fitOrient = null;
+    var tol = 1e-9;
+    for (var oi = 0; oi < orders.length; oi++) {
+      var o = orders[oi];
+      var len = dims[o[0]];
+      var wid = dims[o[1]];
+      var hei = dims[o[2]];
+      if (Number.isFinite(innerL) && len > innerL + tol) continue;
+      if (Number.isFinite(innerW) && wid > innerW + tol) continue;
+      if (Number.isFinite(doorH) && hei > doorH + tol) continue;
+      if (Number.isFinite(innerH) && hei > innerH + tol) continue;
+      fitOrient = { len: len, wid: wid, hei: hei, order: o };
+      break;
     }
 
-    var narrow = Math.min(bb.l, bb.w);
-    var wide = Math.max(bb.l, bb.w);
-    if (Number.isFinite(innerW) && narrow > innerW + 1e-9) {
+    if (!fitOrient) {
+      // 一个朝向都放不进：说清是「底面积」还是「高度」卡住，别只说尺寸超了
+      var sorted = dims.slice().sort(function (a, b) { return a - b; }); // [最薄, 中, 最长]
+      var minFootprintA = sorted[0];
+      var minFootprintB = sorted[1];
+      var minHeight = sorted[0];
+      var heightBlocked = Number.isFinite(doorH) && minHeight > doorH + tol;
+      var footprintBlocked = Number.isFinite(innerW) && minFootprintA > innerW + tol;
+      var msg;
+      if (heightBlocked) {
+        msg = '任何朝向都放不进：最薄的一面也有 ' + num(minHeight) + ' mm，超过 ' + cKey +
+          ' 门高 ' + num(doorH) + ' mm';
+      } else if (footprintBlocked) {
+        msg = '任何朝向都放不进：最小可落地底面 ' + num(minFootprintA) + '×' + num(minFootprintB) +
+          ' mm 超过 ' + cKey + ' 内宽 ' + num(innerW) + ' mm';
+      } else {
+        msg = '任何朝向都放不进：' + num(bb.l) + '×' + num(bb.w) + '×' + num(bb.h) +
+          ' mm 在 ' + cKey + ' 的内长 ' + num(innerL) + ' / 内宽 ' + num(innerW) +
+          ' / 门高 ' + num(doorH) + ' mm 里没有可行朝向';
+      }
+      errs.push({ field: heightKey, level: 'error', message: msg });
+      return errs;
+    }
+
+    // 需要立放/侧放才能装：不拦，但提示用户算法会这么摆（界面上也能看到层高）
+    var uprightFits = Math.abs(fitOrient.hei - bb.h) < 1e-9;
+    if (!uprightFits) {
       errs.push({
-        field: 'W', level: 'error',
-        message: '底面 ' + num(bb.l) + '×' + num(bb.w) + ' mm 的最短边 ' + num(narrow) +
-          ' mm 超过 ' + cKey + ' 内宽 ' + num(innerW) + ' mm，第一版货架排布放不下。'
-      });
-    } else if (Number.isFinite(innerL) && wide > innerL + 1e-9) {
-      errs.push({
-        field: 'L', level: 'error',
-        message: '底面最长边 ' + num(wide) + ' mm 超过 ' + cKey + ' 内长 ' + num(innerL) + ' mm，装不进去。'
+        field: heightKey, level: 'warn',
+        message: '这个箱子要换个方向才装得进：按 ' + num(fitOrient.len) + '×' + num(fitOrient.wid) +
+          ' 底面放、占用 ' + num(fitOrient.hei) + ' mm 高'
       });
     }
 
