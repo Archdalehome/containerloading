@@ -69,6 +69,7 @@
     鼠标移到目标箱子、靠近要贴的角，出现绿点，点它，两点严格重合（Esc 取消）
   </div>
   <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
+  <div id="build" style="margin-top:4px;font-size:11px;color:#64748b"></div>
 </div>
 <div id="side">
   <h3>纸箱清单</h3>
@@ -554,7 +555,12 @@ function cornersFor(uid) {
   return { box: b, cs: CL.cornerLink.cornersOf(b, itemsById[b.skuId]) };
 }
 
-const HANDLE_HIT = 16;   // 指针离角点多少像素以内，才把这个角点显示出来
+// 版本标记：直接写在页面上，用来确认浏览器拿到的是不是新版本（缓存了会显示旧时间）
+const BUILD = '2026-11-03 22:20';
+const buildEl = document.getElementById('build');
+if (buildEl) buildEl.textContent = 'build ' + BUILD + ' · 角点只在靠近时出现';
+
+const HANDLE_HIT = 12;   // 指针离角点多少像素以内，才把这个角点显示出来
 let lastPointer = null;  // 指针屏幕坐标（px）
 let chTarget = null;     // 此刻要显示的那一个角点
 const chEl = document.createElement('div');
@@ -847,9 +853,10 @@ addEventListener('keydown', (ev) => {
   if (k === '3') { ev.preventDefault(); doRotate('z'); }
 });
 
-// 点击选中（拖动的 pointerdown 里顺便记下 uid）
+// 点击选中（拖动的 pointerdown 里顺便记下 uid）；点空白处取消锚点与悬停
 renderer.domElement.addEventListener('click', () => {
   if (lastDownUid) { selected = lastDownUid; paintSelection(); paintCount(); }
+  else { anchor = null; hoverUid = null; }
 });
 let lastDownUid = null;
 renderer.domElement.addEventListener('pointerdown', (ev) => {
