@@ -34,6 +34,15 @@
   #shapes { display: flex; gap: 6px; margin-bottom: 6px; }
   #shapes button { flex: 1; background: #0f172a; color: #cbd5e1; border: 1px solid #334155; border-radius: 5px; padding: 4px 0; cursor: pointer; font: inherit; }
   #shapes button.on { border-color: #38bdf8; color: #38bdf8; }
+  /* 角点手柄：按屏幕坐标叠在 canvas 上，箱子离得再远也不会小到点不中 */
+  #handles { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
+  #handles .ch { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px;
+                 border-radius: 50%; background: #0f172a; border: 2px solid #38bdf8;
+                 box-sizing: border-box; pointer-events: auto; cursor: crosshair; transition: transform .08s; }
+  #handles .ch:hover { background: #38bdf8; transform: scale(1.4); }
+  #handles .ch.anchor { border-color: #f59e0b; background: #f59e0b; }
+  #handles .ch.target { border-color: #22c55e; }
+  #handles .ch.target:hover { background: #22c55e; }
 </style>
 </head>
 <body>
@@ -50,6 +59,9 @@
     <button id="cp">复制</button> <button id="un">撤销</button>
     <button id="pair">对扣</button>
     <span style="color:#94a3b8">（键：1/2/3 旋转 · Ctrl+C/V 复制 · Ctrl+Z 撤销）</span>
+  </div>
+  <div style="margin-top:6px;font-size:13px;color:#94a3b8">
+    对角：点一只箱子 → 点它的<b style="color:#38bdf8">一个角点</b> → 鼠标移到目标箱子 → 点它<b style="color:#22c55e">绿色的角点</b>，两点严格重合（Esc 取消）
   </div>
   <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
 </div>
@@ -75,6 +87,7 @@
   </div>
 </div>
 <div id="status">状态：待拖动</div>
+<div id="handles"></div>
 <div id="stat2" style="position:fixed;right:16px;top:14px;z-index:2;background:rgba(15,23,42,.82);padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.7"></div>
 <script>
   // 错误兜底：页面出任何错都写到状态栏，截图就能看到原因
@@ -96,6 +109,7 @@
 <script src="js/core/solid.js"></script>
 <script src="js/core/pack.js"></script>
 <script src="js/core/manual.js"></script>
+<script src="js/core/corner-link.js"></script>
 <script src="js/core/manual-model.js"></script>
 <script type="module">
 import * as THREE from './vendor/three.module.min.js';
@@ -248,6 +262,12 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   setPointer(ev);
   raycaster.setFromCamera(pointer, camera);
   const hits = raycaster.intersectObjects([...meshes.values()], false);
+  // 对角模式：点箱子只是"看它的角点"，不拖动——否则手一抖就把要对齐的箱子挪跑了
+  if (anchor) {
+    hoverUid = hits.length ? hits[0].object.userData.uid : null;
+    handleSig = '';
+    return;
+  }
   if (!hits.length) return;
   const uid = hits[0].object.userData.uid;
   const b = model.boxes.find((x) => x.uid === uid);
@@ -379,8 +399,17 @@ function placeGhost(ev) {
 }
 
 renderer.domElement.addEventListener('pointermove', (ev) => {
-  if (!dragging) return;
-  placeGhost(ev);
+  if (dragging) { placeGhost(ev); return; }
+  // 悬停：对角模式下靠它决定"现在画哪只箱子的角点"
+  setPointer(ev);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects([...meshes.values()], false);
+  const uid = hits.length ? hits[0].object.userData.uid : null;
+  if (uid !== hoverUid) { hoverUid = uid; handleSig = ''; }
+});
+
+renderer.domElement.addEventListener('pointerleave', () => {
+  if (!dragging && hoverUid !== null) { hoverUid = null; handleSig = ''; }
 });
 
 renderer.domElement.addEventListener('pointerup', (ev) => {
@@ -419,10 +448,12 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
 });
 
 function tick() {
+  syncHandles();          // 角点手柄按屏幕坐标跟住相机
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
-tick();
+// 第一帧必须等模块整个跑完：tick() 里要用手柄相关的 const，直接同步调用会踩暂时性死区
+requestAnimationFrame(tick);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -490,6 +521,117 @@ function paintSelection() {
     const b = model.boxes.find((x) => x.uid === uid);
     m.material = b && b.invalid ? BAD_MAT : matFor(b ? b.skuId : 'x');
   });
+}
+
+// ---- 角点对位：点两个角，让它们严格重合 ----
+const handleLayer = document.getElementById('handles');
+let anchor = null;     // {uid, key, point:{x,y,z}} —— 被点中的那个角
+let hoverUid = null;   // 鼠标压着的箱子：对角模式下把它的角点也画出来
+let handleSig = '';
+let handleDots = [];
+
+function cornersFor(uid) {
+  const b = model.boxes.find((x) => x.uid === uid);
+  if (!b) return { box: null, cs: [] };
+  return { box: b, cs: CL.cornerLink.cornersOf(b, itemsById[b.skuId]) };
+}
+
+/** 该画哪些角点：选中箱恒有；对角模式下再叠上「鼠标压着的那只箱子」的角点 */
+function wantedHandles() {
+  const list = [];
+  cornersFor(selected).cs.forEach((q) => list.push({ uid: selected, q, cls: 'sel' }));
+  if (anchor && hoverUid && hoverUid !== selected) {
+    cornersFor(hoverUid).cs.forEach((q) => list.push({ uid: hoverUid, q, cls: 'target' }));
+  }
+  return list;
+}
+
+function syncHandles() {
+  const list = wantedHandles();
+  const sig = list.map((o) => o.uid + '|' + o.q.key + '|' + o.q.x.toFixed(1) + ',' + o.q.y.toFixed(1) + ',' + o.q.z.toFixed(1) + o.cls).join(';');
+  if (sig !== handleSig) {
+    handleSig = sig;
+    handleLayer.innerHTML = '';
+    handleDots = list.map((o) => {
+      const el = document.createElement('div');
+      el.className = 'ch ' + (o.cls === 'target' ? 'target' : '');
+      el.dataset.uid = o.uid;
+      el.dataset.key = o.q.key;
+      el.title = (o.q.kind === 'face' ? '真实顶面角' : '外接框角') + ' ' +
+        Math.round(o.q.x) + ',' + Math.round(o.q.y) + ',' + Math.round(o.q.z);
+      el.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); });
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); onCornerClick(o.uid, o.q.key); });
+      handleLayer.appendChild(el);
+      return { el, x: o.q.x, y: o.q.y, z: o.q.z };
+    });
+  }
+  const v = new THREE.Vector3();
+  handleDots.forEach((d) => {
+    // 容器坐标 → three 坐标（three 的 y 才是高度）
+    v.set(d.x - c.innerL / 2, d.z, d.y - c.innerW / 2).project(camera);
+    const on = v.z > -1 && v.z < 1;
+    d.el.style.display = on ? 'block' : 'none';
+    if (!on) return;
+    d.el.style.left = ((v.x * 0.5 + 0.5) * innerWidth) + 'px';
+    d.el.style.top = ((-v.y * 0.5 + 0.5) * innerHeight) + 'px';
+  });
+}
+
+/** 点角点：第一次记锚点，第二次让它与目标角重合 */
+function onCornerClick(uid, key) {
+  const cur = cornersFor(uid);
+  if (!cur.box) return;
+  const q = cur.cs.find((x) => x.key === key);
+  if (!q) return;
+  const pt = { x: q.x, y: q.y, z: q.z };
+  // 还没有锚点，或点的是同一只箱子（等于换锚点）：只记录，不平移
+  if (!anchor || anchor.uid === uid) {
+    selected = uid;
+    anchor = { uid, key, point: pt };
+    hoverUid = null;
+    paintSelection();
+    handleSig = '';
+    say('锚点：#' + uid + ' 的角 (' + Math.round(pt.x) + ', ' + Math.round(pt.y) + ', ' + Math.round(pt.z) +
+      ')。把鼠标移到目标箱子上，点它绿色的角点；Esc 取消');
+    return;
+  }
+  const mv = model.boxes.find((b) => b.uid === anchor.uid);
+  const others = model.boxes.filter((b) => b.uid !== anchor.uid);
+  const res = CL.cornerLink.link(mv, anchor.point, cur.box, pt, others, c, itemsById);
+  if (!res.ok) {
+    say('对不上：' + res.message, true);
+    return;
+  }
+  const moved = anchor.uid;
+  model.boxes = model.boxes.map((b) => (b.uid === moved ? Object.assign({}, res.box, { uid: b.uid }) : b));
+  anchor = null;
+  hoverUid = null;
+  selected = moved;
+  handleSig = '';
+  refreshAll();
+  say('已对角：残差 ' + res.residual.dx + ' / ' + res.residual.dy + ' / ' + res.residual.dz +
+    ' mm（应为 0/0/0），接触面 ' + Math.round(res.contact.ratio * 100) + '%（' +
+    (res.contact.floor ? '柜底' : '下层箱面') + '）');
+}
+
+addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && anchor) {
+    anchor = null;
+    hoverUid = null;
+    handleSig = '';
+    say('已取消对角');
+  }
+});
+
+// 便于自检：从控制台就能跑一遍「点两个角」，不用手点
+if (window.__PROTO) {
+  window.__PROTO.corner = {
+    corners: (uid) => cornersFor(uid).cs,
+    click: (uid, key) => onCornerClick(uid, key),
+    get anchor() { return anchor; },
+    get hover() { return hoverUid; },
+    link: CL.cornerLink.link
+  };
 }
 
 /** 重力结算：自下而上让每只箱子重新落到它当下的支撑面上。
