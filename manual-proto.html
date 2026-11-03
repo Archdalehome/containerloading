@@ -344,6 +344,29 @@ function placeGhost(ev) {
     sy = Math.min(Math.max(sy, sup.rect.y), sup.rect.y + sup.rect.w - b.w);
   }
 
+  // 角对角磁吸：本箱 4 个底角 × 场内每个箱子的 4 个角（含柜角），最近一对在 200mm 内就平移重合。
+  // 这是现场堆箱的直觉——靠近就"咬"住一个角，尺寸不同也能对齐一角一边。
+  {
+    const myCorners = [[sx, sy], [sx + b.l, sy], [sx, sy + b.w], [sx + b.l, sy + b.w]];
+    const cands = [[0, 0], [c.innerL, 0], [0, c.innerW], [c.innerL, c.innerW]];
+    others.forEach((o) => {
+      cands.push([o.x, o.y], [o.x + o.l, o.y], [o.x, o.y + o.w], [o.x + o.l, o.y + o.w]);
+    });
+    let bestC = null;
+    for (const [mx, my] of myCorners) {
+      for (const [cx2, cy2] of cands) {
+        const d = Math.hypot(cx2 - mx, cy2 - my);
+        if (d <= 200 && (!bestC || d < bestC.d)) bestC = { d, dx: cx2 - mx, dy: cy2 - my };
+      }
+    }
+    if (bestC) {
+      sx = Math.min(Math.max(sx + bestC.dx, 0), L - b.l);
+      sy = Math.min(Math.max(sy + bestC.dy, 0), W - b.w);
+      dragging.cornerSnap = bestC.d;
+    } else {
+      dragging.cornerSnap = null;
+    }
+  }
   dragging.snapped = Object.assign({}, sn.box, { x: sx, y: sy });
   // 拖到哪儿就落到哪儿的最高支撑面上：这样“把箱子提起来放到另一个上面”是拖过去松手就成，
   // 而不是只能在原地打转。settle 只认完整托住底面的水平面，所以悬空/半压缺口都不会成立。
