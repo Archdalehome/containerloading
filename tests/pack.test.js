@@ -820,5 +820,66 @@ test('垫块关时：需要垫块的方案不充当最优，但要标出来', ()
   assert.strictEqual(on.plans.filter((p) => p.gated).length, 0);
 });
 
+// ---------- 回归基线（任何一次改动把这些数改小，测试必须失败） ----------
+console.log('\n回归基线（改小了就失败）');
+
+const BASELINES = [
+  {
+    name: '40HQ 400×300×300 满柜',
+    want: 1820,
+    run: () => {
+      const r = row('a', { L: '400', W: '300', H: '300' }, 5000);
+      r.allowSide = true; r.allowFlip = true;
+      return P.runPlans(state(C.get('40HQ'), [r]));
+    }
+  },
+  {
+    name: '40GP 400×300×300 满柜',
+    want: 1610,
+    run: () => {
+      const r = row('a', { L: '400', W: '300', H: '300' }, 5000);
+      r.allowSide = true; r.allowFlip = true;
+      return P.runPlans(state(C.get('40GP'), [r]));
+    }
+  },
+  {
+    name: '40GP L 形 600×400(160/240) + 垫块',
+    want: 460,
+    run: () => {
+      const r = row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '', 'lshape');
+      r.allowSide = true; r.allowFlip = true;
+      return P.runPlans({ container: C.get('40GP'), rows: [r], options: { allowDunnage: true } });
+    }
+  },
+  {
+    name: '40HQ 550×450×300（同款换姿态填条带）',
+    want: 872,
+    run: () => {
+      const r = row('a', { L: '550', W: '450', H: '300' }, 3000);
+      r.allowSide = true; r.allowFlip = true;
+      return P.runPlans(state(C.get('40HQ'), [r]));
+    }
+  },
+  {
+    name: '40HQ 610×390×310（同款换姿态填条带）',
+    want: 936,
+    run: () => {
+      const r = row('a', { L: '610', W: '390', H: '310' }, 3000);
+      r.allowSide = true; r.allowFlip = true;
+      return P.runPlans(state(C.get('40HQ'), [r]));
+    }
+  }
+];
+
+BASELINES.forEach((b) => {
+  test('基线 ' + b.name + ' ≥ ' + b.want + ' 箱', () => {
+    const ps = b.run();
+    assert.ok(ps.best.boxes >= b.want,
+      b.name + ' 从 ' + b.want + ' 箱掉到 ' + ps.best.boxes + ' 箱（装载率 ' +
+      (ps.best.fillRate * 100).toFixed(1) + '%）');
+    console.log('      ' + b.name + '：' + ps.best.boxes + ' 箱（基线 ' + b.want + '）');
+  });
+});
+
 console.log('\n' + passed + ' 通过，' + failures.length + ' 失败\n');
 if (failures.length) process.exit(1);
