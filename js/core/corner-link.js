@@ -213,6 +213,9 @@
    */
   function placeOnFace(box, placed, c, itemsById, opts) {
     var tol = (opts && opts.tol !== undefined) ? opts.tol : 150;
+    // maxZ：只考虑不高于它的支撑面。拖动时用滚轮把箱子"往下放"，就是靠这个上限生效——
+    // 否则落位永远吸到脚边最高的那一层，想塞进堆垛下方根本塞不进去。
+    var maxZ = (opts && opts.maxZ !== undefined) ? opts.maxZ : Infinity;
     if (box.h > c.doorH + EPS) {
       return { ok: false, reason: 'door-height', message: '箱高 ' + Math.round(box.h) + 'mm 超过柜门 ' + c.doorH + 'mm' };
     }
@@ -222,6 +225,7 @@
     var pick = null;
     for (var i = 0; i < levels.length; i++) {
       var lv = levels[i];
+      if (lv.z > maxZ + 1) continue;               // 高于当前允许高度：这次不考虑
       if (lv.z + box.h > c.innerH + EPS) continue;
       var bestRect = null, bestArea = 0;
       lv.rects.forEach(function (r) {

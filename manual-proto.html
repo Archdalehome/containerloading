@@ -6,6 +6,8 @@
 <style>
   body { margin: 0; background: #0f172a; color: #e2e8f0; font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; }
   #hud { position: fixed; left: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82); padding: 10px 14px; border-radius: 10px; }
+  #hud-right { position: fixed; right: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82);
+               padding: 10px 14px; border-radius: 10px; text-align: right; }
   #hud b { color: #7dd3fc; }
   #status { position: fixed; left: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82); padding: 8px 14px; border-radius: 10px; min-width: 260px; }
   #status.bad { background: rgba(127,29,29,.9); }
@@ -45,19 +47,21 @@
       <div style="font-size:11px;color:#64748b;line-height:1.2">拖箱子到位置，自动贴边 / 对扣</div>
     </div>
   </div>
-  <div style="margin-top:8px;font-size:13px">
-    柜型：<select id="ctn">
+  <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
+  <div id="build" style="margin-top:4px;font-size:11px;color:#64748b"></div>
+</div>
+<div id="hud-right">
+  <div style="font-size:13px">
+    柜型 <select id="ctn">
       <option>20GP</option><option>40GP</option><option>40HQ</option><option>45HQ</option>
     </select>
-    <span id="dims" style="color:#94a3b8;margin-left:8px"></span>
+    <div id="dims" style="color:#94a3b8;margin-top:4px;font-size:12px"></div>
   </div>
-  <div style="margin-top:6px;font-size:13px">
+  <div style="margin-top:8px;font-size:13px">
     <button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
     <button id="cp">复制</button> <button id="un">撤销</button>
     <button id="pair">对扣</button>
   </div>
-  <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
-  <div id="build" style="margin-top:4px;font-size:11px;color:#64748b"></div>
 </div>
 <div id="side">
   <h3>纸箱清单</h3>
@@ -270,10 +274,10 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   dragOffset = new THREE.Vector3(
     hits[0].object.position.x - hitPoint.x, 0, hits[0].object.position.z - hitPoint.z
   );
-  dragging = { uid, mesh: hits[0].object, start: b, planeY, downX: ev.clientX, downY: ev.clientY };
+  dragging = { uid, mesh: hits[0].object, start: b, planeY, downX: ev.clientX, downY: ev.clientY, zOff: null };
   hits[0].object.material = ghostMat;
   renderer.domElement.setPointerCapture(ev.pointerId);
-  say('拖动中…松手会落到下方最高的支撑面上');
+  say('拖动中：滚轮可上下调落点高度，松手落位');
 });
 
 function containerXY(mesh, b) {
@@ -376,8 +380,10 @@ function placeGhost(ev) {
     }
   }
   if (!preview) {
+    // 默认不加高度上限（吸到脚下最高的一层）；只有用户滚轮压过高度才带上 maxZ
+    const pfOpts = dragging.zOff === null ? { tol: 150 } : { tol: 150, maxZ: dragging.zOff };
     const pf = CL.cornerLink.placeOnFace(
-      Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById, { tol: 150 });
+      Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById, pfOpts);
     if (pf.ok) preview = { box: pf.box, kind: 'face', info: pf };
     else dragging.previewFail = pf.message;
   }
@@ -410,10 +416,32 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
       if (d < 4) return;
     }
     dragging.moved = true;
+    dragging.lastX = ev.clientX;
+    dragging.lastY = ev.clientY;
     placeGhost(ev);
     return;
   }
 });
+
+// 拖动中滚轮调"允许落到的高度"：想塞进堆垛下面就把高度压下来，
+// 否则落位永远吸到脚边最高的那一层，塞不进去。
+renderer.domElement.addEventListener('wheel', (ev) => {
+  if (!dragging) return;
+  ev.preventDefault();
+  const step = ev.shiftKey ? 10 : 50;
+  const hi = Math.max(0, c.innerH - dragging.start.h);
+  // 第一次滚轮从"当前预览到的高度"起算，滚一格才不会跳
+  if (dragging.zOff === null) {
+    dragging.zOff = (dragging.snapped && dragging.snapped.z !== undefined) ? dragging.snapped.z : dragging.start.z;
+  }
+  const next = dragging.zOff + (ev.deltaY > 0 ? -step : step);
+  dragging.zOff = Math.max(0, Math.min(hi, next));
+  dragging.moved = true;
+  if (dragging.lastX !== undefined) {
+    placeGhost({ clientX: dragging.lastX, clientY: dragging.lastY });
+  }
+  say('落点高度上限 z=' + Math.round(dragging.zOff) + 'mm（滚轮向上抬 / 向下压，Shift 精细 10mm）');
+}, { passive: false });
 
 renderer.domElement.addEventListener('pointerup', (ev) => {
   if (!dragging) return;
@@ -536,7 +564,7 @@ function paintSelection() {
 }
 
 // 版本标记：直接写在页面上，用来确认浏览器拿到的是不是新版本（缓存了会显示旧时间）
-const BUILD = '2026-11-03 23:25';
+const BUILD = '2026-11-03 23:40';
 const buildEl = document.getElementById('build');
 if (buildEl) buildEl.textContent = 'build ' + BUILD;
 
