@@ -227,7 +227,9 @@ camera.lookAt(0, H / 2, 0);
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const dragPlaneHits = [];
-let dragging = null;   // { uid, mesh, start, offset }
+let dragging = null;   // { uid, mesh, start, planeY, snapped }
+let dragPlane = null;  // 固定高度的拖拽平面（three 的 Y 是高度）
+let dragOffset = null; // 抓取点相对箱心的水平偏移，避免一按下箱子就跳到鼠标下
 let ghostPos = null;
 
 function setPointer(ev) {
@@ -248,10 +250,19 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   if (!hits.length) return;
   const uid = hits[0].object.userData.uid;
   const b = model.boxes.find((x) => x.uid === uid);
-  dragging = { uid, mesh: hits[0].object, start: b, grab: hits[0].point.clone() };
+  // 固定高度的拖拽平面：不管鼠标划过地板、箱顶还是箱侧，箱子都只在同一水平面上跟手走。
+  // 之前按“射线打到哪个面”来定位，划过别的箱子就会跳高度，这是难控制的根因。
+  const planeY = b.z + b.h / 2;
+  dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
+  const hitPoint = new THREE.Vector3();
+  raycaster.ray.intersectPlane(dragPlane, hitPoint);
+  dragOffset = new THREE.Vector3(
+    hits[0].object.position.x - hitPoint.x, 0, hits[0].object.position.z - hitPoint.z
+  );
+  dragging = { uid, mesh: hits[0].object, start: b, planeY };
   hits[0].object.material = ghostMat;
   renderer.domElement.setPointerCapture(ev.pointerId);
-  say('拖动中…');
+  say('拖动中…松手会落到下方最高的支撑面上');
 });
 
 function containerXY(mesh, b) {
@@ -259,25 +270,30 @@ function containerXY(mesh, b) {
 }
 const SNAP_TOL = 100;   // 吸附容差：越大越“粘”，100mm 时靠近墙角就有感觉
 
+/** 把箱子夹在柜内（拖拽过程中永远不越界），再吸附，最后把网格摆到结果位置 */
+function placeGhost(ev) {
+  setPointer(ev);
+  raycaster.setFromCamera(pointer, camera);
+  const p = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(dragPlane, p)) return;
+  const b = dragging.start;
+  let cxc = p.x + dragOffset.x + L / 2;      // 箱心在柜内坐标
+  let czc = p.z + dragOffset.z + W / 2;
+  const halfL = b.l / 2, halfW = b.w / 2;
+  cxc = Math.min(Math.max(cxc, halfL), L - halfL);
+  czc = Math.min(Math.max(czc, halfW), W - halfW);
+  const cand = Object.assign({}, b, { x: cxc - halfL, y: czc - halfW });
+  const others = model.boxes.filter((o) => o.uid !== dragging.uid);
+  const sn = CL.manual.snap(cand, others, c, SNAP_TOL);
+  const sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
+  const sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
+  dragging.snapped = Object.assign({}, sn.box, { x: sx, y: sy });
+  dragging.mesh.position.set(sx + halfL - L / 2, dragging.planeY, sy + halfW - W / 2);
+}
+
 renderer.domElement.addEventListener('pointermove', (ev) => {
   if (!dragging) return;
-  setPointer(ev);
-  const p = groundHit();
-  if (!p) return;
-  const d = p.clone().sub(dragging.grab);
-  dragging.mesh.position.add(d);
-  dragging.grab.copy(p);
-
-  // 拖动中就吸附：先算出吸附后的位置，把幽灵摆过去，用户松手前就能看到会贴到哪
-  const cand = Object.assign({}, dragging.start, containerXY(dragging.mesh, dragging.start));
-  const others = model.boxes.filter((b) => b.uid !== dragging.uid);
-  const sn = CL.manual.snap(cand, others, c, SNAP_TOL);
-  dragging.snapped = sn.box;
-  dragging.mesh.position.set(
-    sn.box.x + sn.box.l / 2 - L / 2,
-    dragging.mesh.position.y,
-    sn.box.y + sn.box.w / 2 - W / 2
-  );
+  placeGhost(ev);
 });
 
 renderer.domElement.addEventListener('pointerup', (ev) => {
