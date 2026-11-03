@@ -575,7 +575,7 @@ function doPair() {
   // 竖直落点：理论上就是 H低；实测吻合，所以以它为中心小范围校正
   const zBase = sv.hlow;
   const zTry = [0];
-  for (let k = 10; k <= 100; k += 10) { zTry.push(k); zTry.push(-k); }
+  for (let k = 5; k <= 100; k += 5) { zTry.push(k); zTry.push(-k); }
   outer:
   for (const [dx, dy] of offsets) {
     for (const dzOff of zTry) {
@@ -590,8 +590,8 @@ function doPair() {
         { skuId: b.skuId, x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: b.pose },
         trial, it, { step: 10, tol: 1 }
       );
-      // 放宽：有接触即可（缝隙 ≤20mm 算贴合），但绝不能互相穿插
-      if (fit.overlap <= 1 && fit.gap <= 20) { cand = trial; break outer; }
+      // 必须真接触：缝隙 ≤1mm（不许悬着），但允许只碰到一部分（不要求整面压满）
+      if (fit.overlap <= 1 && fit.gap <= 1) { cand = trial; break outer; }
     }
   }
   if (!cand) { say('对扣放不下：这段高度里找不到严丝合缝的位置', true); return; }
