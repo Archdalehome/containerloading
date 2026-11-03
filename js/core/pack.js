@@ -144,6 +144,12 @@
     var poses = posesFor(item);
     var best = null;
     var bestTotal = -1;
+    // 斜顶侧放后顶面是楔形：自己站着还行，但上面那层没法整面贴合，会把后面的层全堵死。
+    // 所以斜顶只在「立着放根本放不进」时才考虑侧放。
+    if (item.shape === 'slope') {
+      var uprightOnly = poses.filter(function (p) { return !p.side && !p.flip; });
+      if (uprightOnly.length) poses = uprightOnly;
+    }
     for (var i = 0; i < poses.length; i++) {
       var pose = poses[i];
       // 倒放只允许出现在对扣里：单独倒放的斜面朝下/箱子倒扣都不合法

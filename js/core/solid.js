@@ -129,7 +129,11 @@
 
   /**
    * 对扣贴合检查：下件顶面与上件底面必须逐列贴合（误差 ≤ tol mm），且实体不重叠。
-   * 返回 {overlap, gap, columns}；columns = 两件同时有实体的采样列数（0 说明根本没对上）。
+   * 返回 {overlap, gap, columns, skipped}；columns = 两件同时有实体的采样列数。
+   *
+   * 采样点正好落在台阶棱上时（例如对称 L 的 W低 边界），两件在那一列的归属各判各的，
+   * 会出现一条 575mm 的假缝隙——棱是一条线、没有面积，不该算进去。所以某列不贴合时，
+   * 往四个方向各挪 1mm 复核：邻居贴得上，就判为棱上的采样假象，跳过。
    */
   function pairFit(lower, upper, item, opts) {
     var s = (opts && opts.step) || 10;
@@ -139,21 +143,38 @@
     var overlap = 0;
     var gap = 0;
     var columns = 0;
+    var skipped = 0;
+
+    function metricAt(X, Y) {
+      var a = spanAt(lower, item, X, Y);
+      var b = spanAt(upper, item, X, Y);
+      if (!a || !b) return null;
+      return {
+        ov: Math.min(a[1], b[1]) - Math.max(a[0], b[0]),
+        gap: Math.abs(b[0] - a[1])
+      };
+    }
+
     for (var i = 0; i < nx; i++) {
       var X = lower.x + (i + 0.5) * lower.l / nx;
       for (var j = 0; j < ny; j++) {
         var Y = lower.y + (j + 0.5) * lower.w / ny;
-        var a = spanAt(lower, item, X, Y);
-        var b = spanAt(upper, item, X, Y);
-        if (!a || !b) continue;
+        var m = metricAt(X, Y);
+        if (!m) continue;
+        if (m.ov > tol || m.gap > tol) {
+          var around = [metricAt(X + 1, Y), metricAt(X - 1, Y), metricAt(X, Y + 1), metricAt(X, Y - 1)]
+            .filter(Boolean);
+          if (around.some(function (q) { return q.ov <= tol && q.gap <= tol; })) {
+            skipped++;
+            continue;
+          }
+        }
         columns++;
-        var ov = Math.min(a[1], b[1]) - Math.max(a[0], b[0]);
-        if (ov > overlap) overlap = ov;
-        var g = Math.abs(b[0] - a[1]);
-        if (g > gap) gap = g;
+        if (m.ov > overlap) overlap = m.ov;
+        if (m.gap > gap) gap = m.gap;
       }
     }
-    return { overlap: overlap, gap: gap, columns: columns, tol: tol };
+    return { overlap: overlap, gap: gap, columns: columns, tol: tol, skipped: skipped };
   }
 
   NS.solid = {

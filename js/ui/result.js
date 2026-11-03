@@ -133,6 +133,13 @@
 
     var html = '';
 
+    // 复制诊断：一段纯文本（柜型 / SKU / 开关 / 结果 / 为什么停 / 体检），用户遇到问题直接粘给我们
+    html += '<div class="diag-bar">' +
+      '<button type="button" id="diag-btn">复制诊断</button>' +
+      '<span class="diag-tip"></span>' +
+      '<span class="diag-hint">遇到问题点一下：把这单的柜型、箱型、开关、为什么停、体检一起复制，粘给我们就能定位</span>' +
+      '</div>';
+
     // 空结果也要有话说：0 箱、方案全不合法、没有可得结论，都不能只留一片空白
     if (pack.planSet && pack.planSet.ranked && pack.planSet.ranked.length === 0) {
       var firstErr = pack.planSet.plans[0] && pack.planSet.plans[0].errors && pack.planSet.plans[0].errors[0];

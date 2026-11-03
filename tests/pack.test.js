@@ -202,6 +202,47 @@ test('侧放的 L 形 / 斜顶：支撑面按真实接触面算，物理校验�
   assert.ok(area(f.bottom) > 0, '侧放 L 的底面算成了 0');
 });
 
+// ---------- 用户那单（2000×470 L 形） ----------
+console.log('\n用户那单：L 形 2000×470、净 0.616 m³/箱、40GP');
+
+test('对称台阶 235/235：对扣可用，≥ 53 箱且物理校验通过（棱上采样不能误判缝隙）', () => {
+  const r = row('a', { L: '2000', W: '470', Wlow: '235', Whigh: '235', Hlow: '325', Hhigh: '900' }, 200, '5', 'lshape');
+  r.allowSide = true;
+  r.allowFlip = true;
+  const ps = P.runPlans({ container: C.get('40GP'), rows: [r], options: {} });
+  assert.ok(ps.best.boxes >= 53, '对称台阶应 ≥ 53 箱，实际 ' + ps.best.boxes);
+  assert.deepStrictEqual(P.validatePhysics(ps.best.pack), [], '对扣方案必须过物理校验');
+});
+
+test('不对称台阶 200/270：不垫块只能 33 箱（第二层只落在 270 条带上），垫块后 60 箱', () => {
+  const mkRow = () => {
+    const r = row('a', { L: '2000', W: '470', Wlow: '200', Whigh: '270', Hlow: '325', Hhigh: '900' }, 200, '5', 'lshape');
+    r.allowSide = true;
+    r.allowFlip = true;
+    return r;
+  };
+  const noDun = P.runPlans({ container: C.get('40GP'), rows: [mkRow()], options: {} });
+  assert.strictEqual(noDun.best.boxes, 33, '不垫块应为 33 箱，实际 ' + noDun.best.boxes);
+  assert.deepStrictEqual(P.validatePhysics(noDun.best.pack), []);
+  const dun = P.runPlans({ container: C.get('40GP'), rows: [mkRow()], options: { allowDunnage: true } });
+  assert.strictEqual(dun.best.boxes, 60, '垫平缺口后应为 2 层 60 箱，实际 ' + dun.best.boxes);
+  assert.deepStrictEqual(P.validatePhysics(dun.best.pack), []);
+});
+
+test('斜顶 2000×470（410/900）40GP：对扣 1310 + 单层 900，每列 3 箱 × 30 = 90 箱', () => {
+  const r = row('a', { L: '2000', W: '470', Hlow: '410', Hhigh: '900' }, 200, '5', 'slope');
+  r.allowSide = true;
+  r.allowFlip = true;
+  const ps = P.runPlans({ container: C.get('40GP'), rows: [r], options: {} });
+  assert.strictEqual(ps.best.boxes, 90, '应为 90 箱（1 对扣 + 1 单层），实际 ' + ps.best.boxes);
+  const kinds = ps.best.pack.layers.map((l) => l.kind).join(',');
+  assert.strictEqual(kinds, 'pair,normal', '层姿态应为对扣 + 单层，实际 ' + kinds);
+  assert.strictEqual(ps.best.pack.usedHeight, 2210, '用高应为 2210，实际 ' + ps.best.pack.usedHeight);
+  assert.deepStrictEqual(P.validatePhysics(ps.best.pack), []);
+  // 侧放斜顶会把上层堵死：不能被选成主姿态
+  assert.ok(ps.best.pack.layers.every((l) => l.kind !== 'side'), '主方案里不该出现侧放斜顶层');
+});
+
 // ---------- 硬基准 ----------
 console.log('\n硬基准（写进代码注释的那个）');
 

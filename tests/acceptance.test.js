@@ -162,5 +162,21 @@ test('同一输入两次结果完全一致（逐箱位置也一样）', () => {
   assert.ok(a.best.boxes > 0);
 });
 
+test('底面超尺寸的箱子：拦下并说明，引擎也不会假装装得进去', () => {
+  // 40HQ 内宽 2352，这只 3000×2500×500 过得了门高、过不了底面
+  const rows = [row('big', { L: '3000', W: '2500', H: '500' }, 2, '30')];
+  const res = V.all(st(rows));
+  assert.strictEqual(res.ok, false, '超宽箱应被校验拦下');
+  const errs = messages(res).filter((e) => e.level === 'error');
+  assert.ok(errs.some((e) => /内宽|内长/.test(e.message)), '提示没说清是底面超尺寸：' + errs.map((e) => e.message).join(' | '));
+
+  // 引擎侧：本柜 0 箱，补柜也装不进（impossibleCount > 0 → 界面上会有「换同规格柜也装不进」那一行）
+  const pack = P.run(st(rows));
+  assert.strictEqual(pack.totals.loadedCount, 0, '超宽箱不该被装进去');
+  const extra = P.extraContainers(st(rows), pack);
+  assert.strictEqual(extra.count, 0, '超宽箱不该算出要开新柜');
+  assert.ok(extra.impossibleCount > 0, '应把超宽箱算进「换柜也装不进」');
+});
+
 console.log('\n' + passed + ' 通过，' + failures.length + ' 失败\n');
 if (failures.length) process.exit(1);

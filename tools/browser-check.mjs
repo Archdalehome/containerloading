@@ -63,11 +63,18 @@ class CDP {
     });
   }
   async evaluate(expression) {
-    const r = await this.send('Runtime.evaluate', {
-      expression,
-      awaitPromise: true,
-      returnByValue: true
-    });
+    // 代理抖动 / 页面忙会让 Runtime.evaluate 超时，这类重试一次有意义；
+    // 页面真报错（exceptionDetails）不重试——重试多少次都该失败。
+    let r;
+    try {
+      r = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    } catch (e) {
+      if (!/超时/.test(e.message)) throw e;
+      console.log('  （首次失败：' + e.message + '，2 秒后重试一次）');
+      await sleep(2000);
+      r = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+      console.log('  （重试通过）');
+    }
     if (r.exceptionDetails) {
       throw new Error('页面脚本异常: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
     }
@@ -380,6 +387,19 @@ function pageTestScript() {
   // 反向：正常结果里不能出现「全不合法」「一箱没装」这两类兜底提示（说明它们只在真异常时出现）
   step('正常结果不出现「全部未通过物理校验」', !partialBody.includes('全部未通过物理校验'), 'ok');
   step('正常结果不出现「一个箱子都没装进去」', !partialBody.includes('一个箱子都没装进去'), 'ok');
+  // 复制诊断：点一下要能拼出一段可粘贴的文本
+  const diagBtn = $('#diag-btn');
+  step('结果页有「复制诊断」按钮', !!diagBtn, diagBtn ? 'ok' : '没有 #diag-btn');
+  if (diagBtn) {
+    click(diagBtn);
+    await wait(200);
+    const txt = (window.CL.ui.diag.last() || '');
+    step('诊断文本含柜型/箱型/开关/为什么停/体检',
+      txt.includes('柜型：') && txt.includes('输入箱型') && txt.includes('开关：') &&
+      txt.includes('为什么停：') && txt.includes('体检：'), txt.slice(0, 100).split(String.fromCharCode(10)).join(' | '));
+    const tip = ($('#result-body .diag-tip') || {}).textContent || '';
+    step('复制后有反馈文字', tip.length > 0, tip);
+  }
   setVal($('.qty-input', cards()[0]), '100');
   await calc();
   await wait(250);
