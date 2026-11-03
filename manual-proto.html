@@ -60,11 +60,25 @@ const ctnKey = new URLSearchParams(location.search).get('container') || '40HQ';
 const ctnSel = document.getElementById('ctn');
 if (ctnSel) {
   ctnSel.value = ctnKey;
-  ctnSel.addEventListener('change', () => { location.search = '?container=' + ctnSel.value; });
+  // 切柜型：只重建渲染对象（线框/地面/相机/标注），数据模型原地保留，
+  // 已摆的箱子一个都不丢；重建后重新校验，越界的标红。
+  ctnSel.addEventListener('change', () => {
+    c = CL.containers.get(ctnSel.value);
+    model.container = c;
+    paintDims();
+    rebuildScene();
+    revalidate();
+    selected = null;
+    refreshAll();
+    say('已切到 ' + ctnSel.value + '：' + c.innerL + '×' + c.innerW + '×' + c.innerH);
+  });
 }
-const c = CL.containers.get(ctnKey);
-document.getElementById('dims').textContent =
-  '内长 ' + c.innerL + ' × 内宽 ' + c.innerW + ' × 内高 ' + c.innerH + ' · 门高 ' + c.doorH;
+let c = CL.containers.get(ctnKey);
+function paintDims() {
+  document.getElementById('dims').textContent =
+    '内长 ' + c.innerL + ' × 内宽 ' + c.innerW + ' × 内高 ' + c.innerH + ' · 门高 ' + c.doorH;
+}
+paintDims();
 const statusEl = document.getElementById('status');
 const say = (msg, bad) => {
   statusEl.textContent = '状态：' + msg;
@@ -79,24 +93,36 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
 
-const L = c.innerL, H = c.innerH, W = c.innerW;
-const origin = new THREE.Vector3(-L / 2, 0, -W / 2);
+let L = c.innerL, H = c.innerH, W = c.innerW;
 const toScene = (x, y, z) => new THREE.Vector3(x - L / 2, y, z - W / 2);
 
-// 柜体线框 + 地平面
-const box = new THREE.Box3(new THREE.Vector3(-L / 2, 0, -W / 2), new THREE.Vector3(L / 2, H, W / 2));
-scene.add(new THREE.LineSegments(
-  new THREE.EdgesGeometry(new THREE.BoxGeometry(L, H, W)),
-  new THREE.LineBasicMaterial({ color: 0x38bdf8 })
-).translateY(H / 2));
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(L, W),
-  new THREE.MeshBasicMaterial({ color: 0x1e293b, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
-);
-floor.rotation.x = -Math.PI / 2;
-floor.position.copy(toScene(L / 2, 0, W / 2));
-floor.name = 'floor';
-scene.add(floor);
+// 柜体线框 + 地平面放在一个组里，切柜型时整组重建
+const world = new THREE.Group();
+scene.add(world);
+let floor = null;
+function rebuildScene() {
+  while (world.children.length) {
+    const o = world.children.pop();
+    if (o.geometry) o.geometry.dispose();
+  }
+  L = c.innerL; H = c.innerH; W = c.innerW;
+  world.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(L, H, W)),
+    new THREE.LineBasicMaterial({ color: 0x38bdf8 })
+  ).translateY(H / 2));
+  floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(L, W),
+    new THREE.MeshBasicMaterial({ color: 0x1e293b, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, 0, 0);
+  floor.name = 'floor';
+  world.add(floor);
+  // 相机按新内腔重新取景
+  camera.position.set(L * 0.85, H * 2.6, W * 3.2);
+  camera.lookAt(0, H / 2, 0);
+}
+rebuildScene();
 
 // 两只箱子（手动模型里的数据才是真的，这里只是渲染）
 const items = [
@@ -266,6 +292,22 @@ function refreshAll() {
   model.boxes.forEach((b) => syncMesh(b));
   paintSelection();
   paintCount();
+}
+
+/** 切柜型后重新校验：越界或过不了门高的标红，箱子不删 */
+function revalidate() {
+  const bad = [];
+  model.boxes.forEach((b) => {
+    const ok = CL.manual.inBounds(b, c);
+    b.invalid = !ok;
+    if (!ok) bad.push(b);
+  });
+  paintSelection();
+  bad.forEach((b) => {
+    const m = meshes.get(b.uid);
+    if (m) m.material = new THREE.MeshLambertMaterial({ color: 0xdc2626 });
+  });
+  return bad;
 }
 
 function paintCount() {
