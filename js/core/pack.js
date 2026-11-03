@@ -1052,14 +1052,6 @@
     var containerVolume = c.innerL * c.innerW * c.innerH;
     var loadedCountFinal = items.reduce(function (s, it) { return s + it.loaded; }, 0);
     var requestedCount = items.reduce(function (s, it) { return s + it.qty; }, 0);
-    // 用高取「主垛层顶」与「侧袋顶」的最大值：侧袋里的箱子可以比本层高，
-    // 只按主格厚度算会让分层明细加起来对不上总高
-    var usedHeight = z;
-    layers.forEach(function (L) {
-      if (L.stripTop && L.stripTop > usedHeight) usedHeight = L.stripTop;
-      var top = typeof L.top === 'number' ? L.top : 0;
-      if (top > usedHeight) usedHeight = top;
-    });
 
     return {
       ok: true,
@@ -1068,7 +1060,7 @@
       placements: placements,
       layers: layers,
       dunnage: dunnageBlocks,
-      usedHeight: usedHeight,
+      usedHeight: z,
       containerVolume: containerVolume,
       stop: stop,
       truncated: stop.code === 'limit',
@@ -1332,23 +1324,6 @@
           errs.push({ code: 'pair-seam', message: '对扣接触面有 ' + S.num(fit.gap) + ' mm 缝隙', placement: u });
         }
       }
-    });
-
-    // 4. 侧袋（条带）上方禁止「跨界」占用：条带箱可以比本层高，条带内自己往上叠没问题，
-    //    但不许让主垛或别的箱型只压住侧袋的一部分——那正是后续层放宽覆盖判断时会犯的错。
-    (pack.placements || []).forEach(function (p) {
-      if (p.kind !== 'strip') return;
-      (pack.placements || []).forEach(function (q) {
-        if (q === p) return;
-        if (q.z < p.z + p.h - EPS) return;
-        var overlap = q.x < p.x + p.l - EPS && q.x + q.l > p.x + EPS &&
-          q.y < p.y + p.w - EPS && q.y + q.w > p.y + EPS;
-        if (!overlap) return;
-        var contained = q.x >= p.x - EPS && q.y >= p.y - EPS &&
-          q.x + q.l <= p.x + p.l + EPS && q.y + q.w <= p.y + p.w + EPS;
-        if (contained) return; // 条带里继续往上叠，和主垛一样是合法的
-        errs.push({ code: 'strip-loaded', message: '侧袋上方被跨界的箱子压住', placement: p, by: q });
-      });
     });
 
     return errs;
