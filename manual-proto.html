@@ -567,17 +567,31 @@ function doPair() {
   // 上件姿态与偏移一律由几何算：findFlipPose 给姿态，pairFit 在高度上搜出"零重叠零缝隙"的那个 z
   const flip = CL.pack.findFlipPose(it, { m: b.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1] });
   if (!flip) { say('这只箱子没有可用的对扣姿态', true); return; }
-  let cand = null, best = null;
-  for (let dz = 0; dz + flip.thickness <= c.innerH + 0.5; dz += 10) {
-    const trial = {
-      skuId: b.skuId, x: b.x, y: b.y, z: b.z + dz,
-      l: flip.fx, w: flip.fy, h: flip.thickness, pose: flip.m
-    };
-    const fit = CL.solid.pairFit(
-      { skuId: b.skuId, x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: b.pose },
-      trial, it, { step: 10, tol: 1 }
-    );
-    if (fit.overlap <= 1 && fit.gap <= 1) { cand = trial; best = fit; break; }
+  let cand = null;
+  // 水平偏移：翻转过姿态的箱子，翻转件的外廓和原件可能不等宽，需要按 s 的符号补一个偏移
+  const sx = (flip.s && flip.s[0] < 0) ? (b.l - flip.fx) : 0;
+  const sy = (flip.s && flip.s[1] < 0) ? (b.w - flip.fy) : 0;
+  const offsets = [[0, 0], [sx, sy], [sx, 0], [0, sy]];
+  // 竖直落点：理论上就是 H低；实测吻合，所以以它为中心小范围校正
+  const zBase = sv.hlow;
+  const zTry = [0];
+  for (let k = 10; k <= 100; k += 10) { zTry.push(k); zTry.push(-k); }
+  outer:
+  for (const [dx, dy] of offsets) {
+    for (const dzOff of zTry) {
+      const dz = zBase + dzOff;
+      if (dz < 0 || b.z + dz + flip.thickness > c.innerH + 0.5) continue;
+      const trial = {
+        skuId: b.skuId, x: b.x + dx, y: b.y + dy, z: b.z + dz,
+        l: flip.fx, w: flip.fy, h: flip.thickness, pose: flip.m
+      };
+      if (!CL.manual.inBounds(trial, c)) continue;
+      const fit = CL.solid.pairFit(
+        { skuId: b.skuId, x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: b.pose },
+        trial, it, { step: 10, tol: 1 }
+      );
+      if (fit.overlap <= 1 && fit.gap <= 1) { cand = trial; break outer; }
+    }
   }
   if (!cand) { say('对扣放不下：这段高度里找不到严丝合缝的位置', true); return; }
   if (!CL.manual.inBounds(cand, c)) { say('对扣放不下：会超出柜内腔或门高', true); return; }
