@@ -38,28 +38,30 @@
 </head>
 <body>
 <div id="hud">
-  手动装柜原型 · 拖一只箱子：松手会<b>沉降 + 吸附</b>，越界或重叠会<b>回弹</b>并写明原因
-  <div style="margin-top:6px;font-size:13px">
+  <div style="display:flex;align-items:center;gap:9px">
+    <img src="assets/logo.png" alt="logo" style="width:28px;height:28px;border-radius:6px;flex:none">
+    <div>
+      <div style="font-size:14px;color:#e2e8f0;line-height:1.2">手动装柜</div>
+      <div style="font-size:11px;color:#64748b;line-height:1.2">拖箱子到位置，自动贴边 / 对扣</div>
+    </div>
+  </div>
+  <div style="margin-top:8px;font-size:13px">
     柜型：<select id="ctn">
       <option>20GP</option><option>40GP</option><option>40HQ</option><option>45HQ</option>
     </select>
     <span id="dims" style="color:#94a3b8;margin-left:8px"></span>
   </div>
   <div style="margin-top:6px;font-size:13px">
-    选中后：<button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
+    <button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
     <button id="cp">复制</button> <button id="un">撤销</button>
     <button id="pair">对扣</button>
-    <span style="color:#94a3b8">（键：1/2/3 旋转 · Ctrl+C/V 复制 · Ctrl+Z 撤销）</span>
-  </div>
-  <div style="margin-top:6px;font-size:13px;color:#94a3b8">
-    <b>移动箱子：按住箱子直接拖</b>（松手落到下方支撑面）｜拖到目标附近松手，落点 150mm 内的箱角/柜角会<b style="color:#22c55e">自动对上</b>，面板会写出残差
   </div>
   <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
   <div id="build" style="margin-top:4px;font-size:11px;color:#64748b"></div>
 </div>
 <div id="side">
   <h3>纸箱清单</h3>
-  <div id="empty">还没有箱型。点下面「＋ 新建箱型」加一个，再点列表里的 <b>＋</b> 就往柜里放一只。</div>
+  <div id="empty">还没有箱型，点下面「＋ 新建箱型」。</div>
   <div id="sku-list"></div>
   <button class="btn" id="new-sku" style="width:100%">＋ 新建箱型</button>
   <div id="form">
@@ -79,7 +81,7 @@
   </div>
 </div>
 <div id="status">状态：待拖动</div>
-<div id="stat2" style="position:fixed;right:16px;top:14px;z-index:2;background:rgba(15,23,42,.82);padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.7"></div>
+<div id="stat2" style="display:none"></div>
 <script>
   // 错误兜底：页面出任何错都写到状态栏，截图就能看到原因
   window.__errs = [];
@@ -534,9 +536,9 @@ function paintSelection() {
 }
 
 // 版本标记：直接写在页面上，用来确认浏览器拿到的是不是新版本（缓存了会显示旧时间）
-const BUILD = '2026-11-03 23:10';
+const BUILD = '2026-11-03 23:25';
 const buildEl = document.getElementById('build');
-if (buildEl) buildEl.textContent = 'build ' + BUILD + ' · 拖动中实时预览：青=贴面贴边 绿=自动对扣';
+if (buildEl) buildEl.textContent = 'build ' + BUILD;
 
 /** 重力结算：自下而上让每只箱子重新落到它当下的支撑面上。
  *  拖走下面那只、删掉一只、转完姿态之后都要跑，否则上面的箱子会悬在空中——违反常识。 */
@@ -693,9 +695,12 @@ addEventListener('keydown', (ev) => {
   if (k === '3') { ev.preventDefault(); doRotate('z'); }
 });
 
-// 点击选中（拖动的 pointerdown 里顺便记下 uid）；点空白处取消锚点与悬停
+// 点击选中；点空白（地板/柜壁）取消选中
 renderer.domElement.addEventListener('click', () => {
-  if (lastDownUid) { selected = lastDownUid; paintSelection(); paintCount(); }
+  if (lastDownUid) { selected = lastDownUid; }
+  else { selected = null; }
+  paintSelection();
+  paintCount();
 });
 let lastDownUid = null;
 renderer.domElement.addEventListener('pointerdown', (ev) => {
