@@ -318,17 +318,29 @@
     var types = allTypes(items, container);
     var relaxed = knapsack(types, container.innerH, { relax: true, ignoreCover: true }).boxes;
 
-    // 体积界：全用净体积最小的箱子
-    var minNet = Infinity;
+    // 体积界：按净体积升序贪心装满柜内容积，尊重每个 SKU 的数量上限。
+    // 旧算法是「最小单箱体积 × 柜容积」再和总需求量取 min——那等于把需求总量当成界
+    // （用户那单因此报 320，而真正的体积界是 292：190 只斜顶 + 102 只 L）。
     var totalQty = 0;
     (items || []).forEach(function (it) {
       if (!it.placeable || it.remaining <= 0) return;
       totalQty += it.remaining;
-      if (it.netVolumeEach > 0 && it.netVolumeEach < minNet) minNet = it.netVolumeEach;
     });
+    var cap = container.innerL * container.innerW * container.innerH;
+    var pool = (items || []).filter(function (it) {
+      return it.placeable && it.remaining > 0 && it.netVolumeEach > 0;
+    }).sort(function (a, b) { return a.netVolumeEach - b.netVolumeEach; });
     var volBound = totalQty;
-    if (Number.isFinite(minNet) && minNet > 0) {
-      volBound = Math.floor(container.innerL * container.innerW * container.innerH / minNet) + 1;
+    if (pool.length) {
+      volBound = 0;
+      var room = cap;
+      for (var pi = 0; pi < pool.length; pi++) {
+        var take = Math.min(pool[pi].remaining, Math.floor(room / pool[pi].netVolumeEach));
+        if (take > 0) {
+          volBound += take;
+          room -= take * pool[pi].netVolumeEach;
+        }
+      }
     }
 
     // 载重界
