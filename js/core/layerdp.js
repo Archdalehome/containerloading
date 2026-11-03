@@ -62,25 +62,28 @@
         stripCap: stripCapacity(item, pose, c, nx, ny)
       });
     });
-    // 对扣：每对 2 箱，顶面拼平可叠
+    // 对扣：每对 2 箱，顶面拼平可叠。
+    // 两个水平朝向都要算：770×700 的 L 形，770 沿柜长是 15×3=45 对，
+    // 转 90° 后 700 沿柜长是 17×3=51 对——只取第一个朝向会少 12 箱/层。
     if (NS.pack.pairFeasible(item) && item.allowFlip) {
       var sv = item.shapeValues;
       var t = sv.hlow + sv.h;
       if (t <= c.innerH + 1e-6 && t <= c.doorH + 1e-6) {
-        var nx2 = Math.max(0, Math.floor((c.innerL + 1e-6) / sv.l));
-        var ny2 = Math.max(0, Math.floor((c.innerW + 1e-6) / sv.w));
-        if (nx2 > 0 && ny2 > 0) {
-          var cl2 = nx2 * sv.l;
-          var cw2 = ny2 * sv.w;
+        [{ l: sv.l, w: sv.w }, { l: sv.w, w: sv.l }].forEach(function (f) {
+          var nx2 = Math.max(0, Math.floor((c.innerL + 1e-6) / f.l));
+          var ny2 = Math.max(0, Math.floor((c.innerW + 1e-6) / f.w));
+          if (nx2 <= 0 || ny2 <= 0) return;
+          var cl2 = nx2 * f.l;
+          var cw2 = ny2 * f.w;
           out.push({
             skuId: item.id, kind: 'pair', pose: null, thickness: t,
             boxes: nx2 * ny2 * 2,
             cover: { l: cl2, w: cw2 },
             fullFloor: cl2 >= c.innerL - 1 && cw2 >= c.innerW - 1,
             stackable: true,
-            stripCap: stripCapacity(item, { fx: sv.l, fy: sv.w }, c, nx2, ny2)
+            stripCap: stripCapacity(item, { fx: f.l, fy: f.w }, c, nx2, ny2)
           });
-        }
+        });
       }
     }
     return out;
