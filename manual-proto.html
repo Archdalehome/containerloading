@@ -327,25 +327,14 @@ function supportRectUnder(placed, h, x, y, l, w) {
 function placeGhost(ev) {
   setPointer(ev);
   raycaster.setFromCamera(pointer, camera);
-  // 取鼠标正下方真正命中的面（地板或某个箱顶）来定位，而不是固定高度的平面：
-  // 用固定平面时，你瞄箱顶、射线却先穿过低平面，落点会偏到箱子后面去，导致永远叠不上。
-  const targets = [floor].concat(
-    Array.from(meshes.values()).filter((m) => m.userData.uid !== dragging.uid)
-  );
-  const hits = raycaster.intersectObjects(targets, false);
+  // 水平位置一律用"箱子自己那一层高度"的平面来取，而不是鼠标正下方命中的面。
+  // 命中面定位会在穿过柜壁线、地板、别的箱顶时不断换面，箱子就跟着跳——
+  // 这才是"被集装箱轮廓线干扰"的真正原因。落在哪一层由 placeOnFace 算，不靠射线。
+  const p = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(dragPlane, p)) return;
   const b = dragging.start;
-  let cxc, czc;
-  if (hits.length) {
-    const hp = hits[0].point;
-    cxc = hp.x + dragOffset.x + L / 2;
-    czc = hp.z + dragOffset.z + W / 2;
-  } else {
-    // 指向柜外时退回固定平面，避免箱子被甩飞
-    const p = new THREE.Vector3();
-    if (!raycaster.ray.intersectPlane(dragPlane, p)) return;
-    cxc = p.x + dragOffset.x + L / 2;
-    czc = p.z + dragOffset.z + W / 2;
-  }
+  let cxc = p.x + dragOffset.x + L / 2;
+  let czc = p.z + dragOffset.z + W / 2;
   const halfL = b.l / 2, halfW = b.w / 2;
   cxc = Math.min(Math.max(cxc, halfL), L - halfL);
   czc = Math.min(Math.max(czc, halfW), W - halfW);
