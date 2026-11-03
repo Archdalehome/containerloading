@@ -98,5 +98,34 @@ test('箱高超过柜门：直接拒绝，不要绕到"没支撑"', () => {
   assert.strictEqual(r.reason, 'door-height');
 });
 
+test('不同尺寸叠放：小箱落在大箱顶面，至少一条边自动贴齐（不是含糊的偏移）', () => {
+  const items = { big: rect('big', 800, 600, 400), sm: rect('sm', 300, 300, 300) };
+  const big = box('big', 0, 0, 0, 800, 600, 400, 'G1');
+  const drop = box('sm', 500, 350, 300, 300, 300, 300, 'S1');
+  const r = L.placeOnFace(drop, [big], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.strictEqual(r.box.z, 400);
+  assert.strictEqual(r.box.y, 300, '右边贴齐：y + 箱宽 300 应等于 600，实际 ' + r.box.y);
+  assert.ok(r.aligned.moved, '必须发生边对齐');
+});
+
+test('落在支撑面中间（离边都很远）：贴支撑面最近的一条边，落点仍然确定', () => {
+  const items = { big: rect('big', 2000, 1000, 400), sm: rect('sm', 300, 300, 300) };
+  const big = box('big', 0, 0, 0, 2000, 1000, 400, 'G1');
+  const drop = box('sm', 850, 350, 300, 300, 300, 300, 'S1');
+  const r = L.placeOnFace(drop, [big], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.strictEqual(r.box.x, 0, '应贴到支撑面边上，实际 x=' + r.box.x);
+  assert.strictEqual(r.aligned.moved, true);
+});
+
+test('只有柜底时不做无底线吸附：落点保持原样', () => {
+  const items = { sm: rect('sm', 300, 300, 300) };
+  const drop = box('sm', 1000, 500, 0, 300, 300, 300, 'S1');
+  const r = L.placeOnFace(drop, [], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  assert.deepStrictEqual([r.box.x, r.box.y], [1000, 500]);
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败\n');
 if (fail) process.exit(1);

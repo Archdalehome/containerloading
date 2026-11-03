@@ -237,23 +237,62 @@
       return { ok: false, reason: 'no-support', message: '脚下没有能托住 ' + Math.round(box.l) + '×' + Math.round(box.w) + 'mm 底面的平面' };
     }
     var cand = Object.assign({}, box, { z: pick.z });
-    // 角对齐：底面的 4 个角 vs 支撑面的 4 个角，取位移最小且在 tol 内的那一对
-    var best = null;
-    [[0, 0], [1, 0], [0, 1], [1, 1]].forEach(function (fc) {
-      var fx = cand.x + fc[0] * cand.l, fy = cand.y + fc[1] * cand.w;
-      [[0, 0], [1, 0], [0, 1], [1, 1]].forEach(function (rc) {
-        var rx = pick.rect.x + rc[0] * pick.rect.l, ry = pick.rect.y + rc[1] * pick.rect.w;
-        var dx = rx - fx, dy = ry - fy;
-        var d = Math.sqrt(dx * dx + dy * dy);
-        if (d > tol) return;
-        if (!best || d < best.d) best = { d: d, dx: dx, dy: dy, fc: fc, rc: rc };
+    // 逐轴找边对齐：x、y 各自独立，取"位移最小"的那条边；箱型/尺寸不同也照样能用。
+    // 一个轴上一个候选都没有时（比如落在很大的柜底上），退而贴支撑面最近的边，
+    // 保证落点永远是确定的，不会停在"差几十毫米"的含糊位置。
+    function edgeCandidates(axis, cur, size, rect) {
+      var out = [];
+      var lo = axis === 'x' ? c.innerL : c.innerW;
+      out.push({ d: 0 - cur, tag: '柜壁0' });
+      out.push({ d: (lo - size) - cur, tag: '柜壁max' });
+      if (rect) {
+        var r0 = axis === 'x' ? rect.x : rect.y;
+        var r1 = r0 + (axis === 'x' ? rect.l : rect.w);
+        out.push({ d: r0 - cur, tag: '支撑面-' });
+        out.push({ d: r1 - size - cur, tag: '支撑面+' });
+        out.push({ d: r1 - cur, tag: '支撑面右缘对左缘' });
+        out.push({ d: r0 - (cur + size), tag: '支撑面左缘对右缘' });
+      }
+      others.forEach(function (o) {
+        var o0 = axis === 'x' ? o.x : o.y;
+        var o1 = o0 + (axis === 'x' ? o.l : o.w);
+        var tag = '#' + o.uid;
+        out.push({ d: o0 - cur, tag: tag + ' 齐左' });
+        out.push({ d: o1 - size - cur, tag: tag + ' 齐右' });
+        out.push({ d: o1 - cur, tag: tag + ' 右缘接左缘' });
+        out.push({ d: o0 - (cur + size), tag: tag + ' 左缘接右缘' });
       });
-    });
-    var aligned = { dx: 0, dy: 0, moved: false };
-    if (best) {
-      cand.x += best.dx; cand.y += best.dy;
-      aligned = { dx: r1(best.dx), dy: r1(best.dy), moved: true, corner: best.fc.join('') + '→' + best.rc.join('') };
+      return out;
     }
+    function pickEdge(axis, cur, size, rect) {
+      var cands = edgeCandidates(axis, cur, size, rect);
+      var bestC = null;
+      cands.forEach(function (k) {
+        if (!bestC || Math.abs(k.d) < Math.abs(bestC.d)) bestC = k;
+      });
+      return bestC;
+    }
+    var ex = pickEdge('x', cand.x, cand.l, pick.rect);
+    var ey = pickEdge('y', cand.y, cand.w, pick.rect);
+    var aligned = { dx: 0, dy: 0, moved: false, x: null, y: null };
+    if (ex && Math.abs(ex.d) <= tol) { cand.x += ex.d; aligned.dx = r1(ex.d); aligned.x = ex.tag; }
+    if (ey && Math.abs(ey.d) <= tol) { cand.y += ey.d; aligned.dy = r1(ey.d); aligned.y = ey.tag; }
+    // 没有近的边 → 直接贴支撑面最近的一条边（不是柜底时），落点仍然确定
+    if (pick.rect && pick.rect.owner !== 'floor') {
+      if (!aligned.x) {
+        var r0x = pick.rect.x, r1x = r0x + pick.rect.l;
+        var dLeft = r0x - cand.x, dRight = (r1x - cand.l) - cand.x;
+        if (Math.abs(dLeft) <= Math.abs(dRight)) { cand.x += dLeft; aligned.dx = r1(dLeft); aligned.x = '贴支撑面左缘'; }
+        else { cand.x += dRight; aligned.dx = r1(dRight); aligned.x = '贴支撑面右缘'; }
+      }
+      if (!aligned.y) {
+        var r0y = pick.rect.y, r1y = r0y + pick.rect.w;
+        var dLo = r0y - cand.y, dHi = (r1y - cand.w) - cand.y;
+        if (Math.abs(dLo) <= Math.abs(dHi)) { cand.y += dLo; aligned.dy = r1(dLo); aligned.y = '贴支撑面前缘'; }
+        else { cand.y += dHi; aligned.dy = r1(dHi); aligned.y = '贴支撑面后缘'; }
+      }
+    }
+    aligned.moved = !!(aligned.x || aligned.y);
     if (cand.x < -EPS || cand.y < -EPS ||
         cand.x + cand.l > c.innerL + EPS || cand.y + cand.w > c.innerW + EPS) {
       return { ok: false, reason: 'bounds', message: '对齐后超出柜内腔', box: cand };
