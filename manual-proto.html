@@ -269,7 +269,7 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
 function containerXY(mesh, b) {
   return { x: mesh.position.x + L / 2 - b.l / 2, y: mesh.position.z + W / 2 - b.w / 2 };
 }
-const SNAP_TOL = 100;   // 吸附容差：越大越“粘”，100mm 时靠近墙角就有感觉
+const SNAP_TOL = 160;   // 吸附容差：越大越“粘”。现场堆箱是靠近就对齐，160mm 才有明显的磁吸感
 
 /** 找出脚下能托住 (l×w) 的最高支撑高度：把同一高度的所有支撑面并起来看（两只箱拼着也能托住） */
 function supportRectUnder(placed, h, x, y, l, w) {
