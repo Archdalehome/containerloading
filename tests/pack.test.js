@@ -972,7 +972,7 @@ const BASELINES = [
   },
   {
     name: '40HQ 550×450×300（同款换姿态填条带）',
-    want: 872,
+    want: 960,
     run: () => {
       const r = row('a', { L: '550', W: '450', H: '300' }, 3000);
       r.allowSide = true; r.allowFlip = true;

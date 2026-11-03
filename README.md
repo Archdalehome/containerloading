@@ -25,9 +25,12 @@ python -m http.server 8080
 ## 自检
 
 ```bash
-node tests/core.test.js          # 表单/几何/校验（17 项）
-node tests/pack.test.js          # 排布算法：1680 基准 + 随机 200 组不越界不重叠（13 项）
-node tools/browser-check.mjs     # 真实浏览器点击测试（52 项）+ 2 项 3D 几何 + 截图，需先起本地服务
+node tests/core.test.js          # 表单/几何/校验
+node tests/pack.test.js          # 排布算法：六组基线 + 随机 200 组不越界不重叠 + 入口收敛
+node tests/solid-volume.test.js  # 体积不变性：任意姿态下采样体积 = 解析体积（<1%）
+node tests/manual.test.js        # 手动模式逻辑层：沉降 / 贴齐 / 拒绝落位 / 旋转
+node tests/ref-physics.test.js   # 参考解自己也要过逐箱物理校验
+node tools/browser-check.mjs     # 真实浏览器点击测试 + 2 项 3D 几何 + 截图，需先起本地服务
 CHECK_WIDTH=390 node tools/browser-check.mjs   # 手机宽度再跑一遍
 ```
 

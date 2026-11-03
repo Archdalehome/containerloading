@@ -9,16 +9,28 @@
 
   var NS = (root.CL = root.CL || {});
   if (!NS.pack && typeof require === 'function') NS.pack = require('./pack.js');
+  if (!NS.solid && typeof require === 'function') NS.solid = require('./solid.js');
   var P = NS.pack;
+  var SOLID = NS.solid;
   var EPS = 1e-6;
+  var IDENT = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
   function overlapsXY(a, b) {
     return a.x < b.x + b.l - EPS && b.x < a.x + a.l - EPS &&
       a.y < b.y + b.w - EPS && b.y < a.y + a.w - EPS;
   }
 
-  function overlaps(a, b) {
-    return overlapsXY(a, b) && a.z < b.z + b.h - EPS && b.z < a.z + a.h - EPS;
+  /**
+   * 两只箱子是否真的打架：外接框先筛，相交的少数对再用 solid 采样确认。
+   * 只看外接框会把「小箱塞进 L 形缺口」误判成重叠（外接框必然相交、实体不碰）。
+   */
+  function overlaps(a, b, itemsById) {
+    if (!overlapsXY(a, b)) return false;
+    if (!(a.z < b.z + b.h - EPS && b.z < a.z + a.h - EPS)) return false;
+    var ia = itemsById && itemsById[a.skuId];
+    var ib = itemsById && itemsById[b.skuId];
+    if (!ia || !ib || !SOLID || !SOLID.overlapDepth) return true;
+    return SOLID.overlapDepth(a, b, ia, ib, 10) > 1;
   }
 
   function inBounds(box, c) {
@@ -117,16 +129,40 @@
       return { ok: false, reason: 'bounds', message: '超出柜内腔或门高', box: box };
     }
     for (var i = 0; i < placed.length; i++) {
-      if (overlaps(box, placed[i])) {
+      if (overlaps(box, placed[i], itemsById)) {
         return { ok: false, reason: 'overlap', message: '与已有箱体重叠', box: box, with: placed[i] };
       }
     }
     return { ok: true, box: box, snaps: snapped.snaps };
   }
 
-  /* 三轴各 90°：只改外廓尺寸，姿态矩阵交给 3D 层（与自动模式同一套） */
+  /* ---------- 旋转：累积 3×3 姿态矩阵，与自动模式同一套表示 ---------- */
+
+  function mul3(a, b) {
+    var o = new Array(9);
+    for (var i = 0; i < 3; i++) {
+      for (var j = 0; j < 3; j++) {
+        o[i * 3 + j] = a[i * 3 + 0] * b[0 * 3 + j] +
+          a[i * 3 + 1] * b[1 * 3 + j] +
+          a[i * 3 + 2] * b[2 * 3 + j];
+      }
+    }
+    return o;
+  }
+  var ROT = {
+    x: [1, 0, 0, 0, 0, -1, 0, 1, 0],
+    y: [0, 0, 1, 0, 1, 0, -1, 0, 0],
+    z: [0, -1, 0, 1, 0, 0, 0, 0, 1]
+  };
+
+  /**
+   * 绕容器某根轴转 90°：姿态矩阵累乘、外廓同步换位。
+   * 只换外廓不产出 pose 的话，L 形/斜顶箱在 3D 里会「外廓转了、楔形没转」。
+   */
   function rotate90(box, axis) {
     var out = Object.assign({}, box);
+    var R = ROT[axis] || ROT.z;
+    out.pose = mul3(R, box.pose || IDENT);
     if (axis === 'x') { var t1 = out.w; out.w = out.h; out.h = t1; }
     else if (axis === 'y') { var t2 = out.l; out.l = out.h; out.h = t2; }
     else { var t3 = out.l; out.l = out.w; out.w = t3; }

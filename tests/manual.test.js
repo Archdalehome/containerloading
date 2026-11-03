@@ -7,6 +7,7 @@
 const assert = require('assert');
 const C = require('../js/core/containers.js');
 const M = require('../js/core/manual.js');
+const SOLID = require('../js/core/solid.js');
 
 let pass = 0;
 let fail = 0;
@@ -95,6 +96,47 @@ test('旋转后固定顺序：旋转 → 沉降 → 判定，不合法退回原�
   const bad = M.rotateAndPlace(tall, [], c, itemsById, 'x');
   assert.strictEqual(bad.ok, false);
   assert.strictEqual(bad.box.h, 2600, '失败时必须退回原姿态');
+});
+
+test('L 形缺口里塞小箱：外接框相交但实体不碰，必须判为合法', () => {
+  const lItem = {
+    id: 'l', shape: 'lshape', bbox: { l: 600, w: 400, h: 500 },
+    shapeValues: { l: 600, w: 400, h: 500, wlow: 160, whigh: 240, hlow: 300, hhigh: 500 }
+  };
+  const by = Object.assign({}, itemsById, {
+    l: lItem,
+    s: { id: 's', shape: 'rect', bbox: { l: 100, w: 100, h: 100 }, shapeValues: { l: 100, w: 100, h: 100 } }
+  });
+  const big = { skuId: 'l', x: 0, y: 0, z: 0, l: 600, w: 400, h: 500, pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] };
+  const small = { skuId: 's', x: 0, y: 0, z: 300, l: 100, w: 100, h: 100 };
+  assert.strictEqual(M.overlaps(small, big, by), false, '实体不重叠，不该判成重叠（外接框会相交）');
+  const r = M.tryPlace(small, [big], c, by);
+  assert.ok(r.ok, '缺口里的合法摆放被拒了：' + r.reason);
+  assert.strictEqual(r.box.z, 300, '应落在台阶面上，实际 ' + r.box.z);
+});
+
+test('L 形转 90°：返回姿态矩阵，采样几何随姿态变化', () => {
+  const lItem = {
+    id: 'l', shape: 'lshape', bbox: { l: 600, w: 400, h: 500 },
+    shapeValues: { l: 600, w: 400, h: 500, wlow: 160, whigh: 240, hlow: 300, hhigh: 500 }
+  };
+  const base = { skuId: 'l', x: 0, y: 0, z: 0, l: 600, w: 400, h: 500, pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] };
+  const rot = M.rotate90(base, 'y');
+  assert.ok(rot.pose && rot.pose.join(',') !== base.pose.join(','), '必须返回新的姿态矩阵');
+  assert.deepStrictEqual([rot.l, rot.w, rot.h], [500, 400, 600]);
+  let q = rot;
+  for (let i = 0; i < 3; i++) q = M.rotate90(q, 'y');
+  assert.ok(q.pose.every((v, i) => Math.abs(v - base.pose[i]) < 1e-9), '绕同一轴转四次回到原姿态');
+  assert.deepStrictEqual([q.l, q.w, q.h], [600, 400, 500]);
+  // 采样：侧躺后缺口在水平面内，外接框里应有列完全没有实体
+  const p = { x: 0, y: 0, z: 0, l: rot.l, w: rot.w, h: rot.h, pose: rot.pose };
+  let empty = 0, solid = 0;
+  for (let X = 10; X < rot.l; X += 25) {
+    for (let Y = 10; Y < rot.w; Y += 25) {
+      if (SOLID.spanAt(p, lItem, X, Y)) solid++; else empty++;
+    }
+  }
+  assert.ok(solid > 0 && empty > 0, '应有实体也有空缺，实际 solid=' + solid + ' empty=' + empty);
 });
 
 console.log('\n' + pass + ' 通过，' + fail + ' 失败\n');
