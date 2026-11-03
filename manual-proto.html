@@ -288,7 +288,14 @@ function placeGhost(ev) {
   const sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
   const sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
   dragging.snapped = Object.assign({}, sn.box, { x: sx, y: sy });
-  dragging.mesh.position.set(sx + halfL - L / 2, dragging.planeY, sy + halfW - W / 2);
+  // 拖到哪儿就落到哪儿的最高支撑面上：这样“把箱子提起来放到另一个上面”是拖过去松手就成，
+  // 而不是只能在原地打转。settle 只认完整托住底面的水平面，所以悬空/半压缺口都不会成立。
+  const st = CL.manual.settle(
+    Object.assign({}, b, { x: sx, y: sy, z: c.innerH }), others, c, itemsById
+  );
+  const targetZ = st.ok ? st.z : b.z;
+  dragging.targetZ = targetZ;
+  dragging.mesh.position.set(sx + halfL - L / 2, targetZ + b.h / 2, sy + halfW - W / 2);
 }
 
 renderer.domElement.addEventListener('pointermove', (ev) => {
@@ -305,7 +312,7 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   // 落位用拖动中已经算好的吸附位置（没有就现场再算一次），再交给 tryPlace 做沉降与判定
   const base = snappedBox || Object.assign({}, start, containerXY(mesh, start));
   const res = CL.manual.tryPlace(
-    { skuId: start.skuId, x: base.x, y: base.y, z: start.z, l: start.l, w: start.w, h: start.h, pose: start.pose },
+    { skuId: start.skuId, x: base.x, y: base.y, z: c.innerH, l: start.l, w: start.w, h: start.h, pose: start.pose },
     model.boxes.filter((b) => b.uid !== uid), c, itemsById, { tol: SNAP_TOL }
   );
   if (!res.ok) {
