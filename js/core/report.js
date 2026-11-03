@@ -125,6 +125,28 @@
     out.push(line(['导出时间', stamp(now)]));
     out.push('');
 
+    // 各箱型装载结果：工厂/货代最常看的一段——每个 SKU 要多少、装了多少、还剩多少、为什么没装
+    out.push(line(['各箱型装载结果']));
+    out.push(line(['序号', '箱型', '名称', '外接尺寸(mm)', '需求(箱)', '已装(箱)', '剩余(箱)',
+      '净体积(m³)', '未装原因']));
+    pack.items.forEach(function (it, i) {
+      var reason = it.remaining > 0
+        ? (it.reason && it.reason.message ? it.reason.message : (it.stack ? it.stack.message : '未装入'))
+        : '全部装入';
+      out.push(line([
+        i + 1,
+        it.shapeName,
+        nameById[it.id],
+        num(it.bbox.l) + '×' + num(it.bbox.w) + '×' + num(it.bbox.h),
+        it.qty,
+        it.loaded,
+        it.remaining,
+        m3(it.loaded * it.netVolumeEach),
+        reason
+      ]));
+    });
+    out.push('');
+
     out.push(line(['分层小计（自下而上）']));
     out.push(line(['层号', '箱型', '名称', '箱数', '单层容量', '层高(mm)', '层底(mm)', '层顶(mm)', '姿态']));
     layerRows(pack).forEach(function (L) {

@@ -66,6 +66,16 @@
         errs.push({ field: 'weight', level: 'error', message: '单箱重量必须是不小于 0 的数字，或留空' });
       } else if (w === 0) {
         errs.push({ field: 'weight', level: 'warn', message: '单箱重量为 0，载重判断会失真' });
+      } else {
+        // 单箱就超过整柜载重：这一柜一箱都装不了，必须直接说清，不能算出 0 箱让用户猜
+        var payload = toNum(container && container.payload);
+        if (Number.isFinite(payload) && payload > 0 && w > payload + 1e-9) {
+          errs.push({
+            field: 'weight', level: 'error',
+            message: '单箱重 ' + num(w) + ' kg 超过 ' + ((container && container.key) || '本柜') +
+              ' 载重上限 ' + num(payload) + ' kg，单个柜连一箱都装不了'
+          });
+        }
       }
     } else {
       errs.push({ field: 'weight', level: 'warn', message: '未填单箱重量，无法判断是否超载' });

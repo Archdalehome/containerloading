@@ -121,8 +121,9 @@
 ## 本地自检
 
 ```bash
-node tests/core.test.js     # 表单/几何/校验
-node tests/pack.test.js     # 排布、物理断言（含反向用例）、多方案枚举
-node tests/report.test.js   # 导出清单
+node tests/core.test.js       # 表单/几何/校验
+node tests/pack.test.js       # 排布、物理断言（含反向用例）、多方案枚举、回归基线
+node tests/report.test.js     # 导出清单
+node tests/acceptance.test.js # 四条验收：异常输入 / 性能 / 导出齐全 / 可复现
 node tools/browser-check.mjs  # 真实浏览器点击 + 3D 几何（需先起本地服务）
 ```
