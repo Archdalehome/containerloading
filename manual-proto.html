@@ -270,25 +270,37 @@ function containerXY(mesh, b) {
 }
 const SNAP_TOL = 100;   // 吸附容差：越大越“粘”，100mm 时靠近墙角就有感觉
 
-/** 找出脚下能完整托住 (l×w) 的最高支撑面；返回 { z, rect } 或 null */
+/** 找出脚下能托住 (l×w) 的最高支撑高度：把同一高度的所有支撑面并起来看（两只箱拼着也能托住） */
 function supportRectUnder(placed, h, x, y, l, w) {
-  let best = null;
+  const byZ = new Map();
   placed.forEach((p) => {
     const it = itemsById[p.skuId];
     if (!it || !CL.pack.surfacesOf) return;
     CL.pack.surfacesOf(it, p).forEach((s) => {
-      const r = s.rect;
-      if (r.l + 1e-6 < l || r.w + 1e-6 < w) return;      // 托不住整块底面
-      if (s.z + h > c.innerH + 1e-6) return;              // 放上去也超高
-      // 只在“几乎落在上面”时吸过去，别从远处把箱子拽走
-      const overlapX = Math.min(x + l, r.x + r.l) - Math.max(x, r.x);
-      const overlapY = Math.min(y + w, r.y + r.w) - Math.max(y, r.y);
-      if (overlapX <= 0 || overlapY <= 0) return;
-      if (overlapX * overlapY < 0.6 * l * w) return;
-      if (!best || s.z > best.z) best = { z: s.z, rect: r };
+      const key = Math.round(s.z * 1000) / 1000;
+      if (!byZ.has(key)) byZ.set(key, []);
+      byZ.get(key).push(s.rect);
     });
   });
-  return best;
+  const zs = Array.from(byZ.keys()).filter((z) => z + h <= c.innerH + 1e-6).sort((a, b) => b - a);
+  for (const z of zs) {
+    const rects = byZ.get(z);
+    // 这一高度的支撑面并集的外接框：箱子贴进去，尽量落在支撑上
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    rects.forEach((r) => {
+      const ix = Math.min(x + l, r.x + r.l) - Math.max(x, r.x);
+      const iy = Math.min(y + w, r.y + r.w) - Math.max(y, r.y);
+      if (ix <= 0 || iy <= 0) return;
+      x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y);
+      x1 = Math.max(x1, r.x + r.l); y1 = Math.max(y1, r.y + r.w);
+    });
+    if (x0 === Infinity) continue;
+    const coverW = Math.min(x + l, x1) - Math.max(x, x0);
+    const coverH = Math.min(y + w, y1) - Math.max(y, y0);
+    if (coverW <= 0 || coverH <= 0) continue;
+    return { z, rect: { x: x0, y: y0, l: x1 - x0, w: y1 - y0 } };
+  }
+  return null;
 }
 
 /** 把箱子夹在柜内（拖拽过程中永远不越界），再吸附，最后把网格摆到结果位置 */
@@ -312,7 +324,7 @@ function placeGhost(ev) {
   // 关键一步：把箱子“吸进”下方支撑面的矩形里。
   // 否则靠近箱顶边缘时会在“能叠/压一半”之间来回跳，最后落到半压位置被判重叠。
   const sup = supportRectUnder(others, b.h, sx, sy, b.l, b.w);
-  if (sup) {
+  if (sup && sup.rect.l >= b.l - 1e-6 && sup.rect.w >= b.w - 1e-6) {
     sx = Math.min(Math.max(sx, sup.rect.x), sup.rect.x + sup.rect.l - b.l);
     sy = Math.min(Math.max(sy, sup.rect.y), sup.rect.y + sup.rect.w - b.w);
   }
