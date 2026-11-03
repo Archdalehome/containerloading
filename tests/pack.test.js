@@ -243,6 +243,59 @@ test('斜顶 2000×470（410/900）40GP：对扣 1310 + 单层 900，每列 3 �
   assert.ok(ps.best.pack.layers.every((l) => l.kind !== 'side'), '主方案里不该出现侧放斜顶层');
 });
 
+// ---------- 层型背包（新路径，先与引擎对平，不替换主循环） ----------
+console.log('\n层型背包：与引擎对平（覆盖矩形已进背包约束）');
+
+const DP = require('../js/core/layerdp.js');
+
+function enginePack(key, rows, opts) {
+  const ps = P.runPlans({ container: C.get(key), rows, options: opts || {} });
+  return ps.best.pack;
+}
+function baseRow(values, qty, weight, shape) {
+  const r = row('a', values, qty, weight, shape);
+  r.allowSide = true;
+  r.allowFlip = true;
+  return r;
+}
+
+test('背包在 1820 / 1610 / 460 / 90 四组上和引擎一致', () => {
+  const cases = [
+    ['40HQ', baseRow({ L: '400', W: '300', H: '300' }, 5000, '8'), 1820],
+    ['40GP', baseRow({ L: '400', W: '300', H: '300' }, 5000, '8'), 1610],
+    ['40GP', baseRow({ L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '9', 'lshape'), 460],
+    ['40GP', baseRow({ L: '2000', W: '470', Hlow: '410', Hhigh: '900' }, 200, '5', 'slope'), 90]
+  ];
+  cases.forEach(([key, r, want]) => {
+    const pack = enginePack(key, [r], { allowDunnage: true });
+    const sol = DP.solve(pack.items, pack.container);
+    assert.strictEqual(sol.boxes, want, key + ' 背包应 ' + want + ' 箱，实际 ' + sol.boxes);
+    assert.ok(sol.height <= pack.container.innerH + 1e-6, '背包层高超过柜内高');
+  });
+});
+
+test('背包带覆盖约束：上层不能超出下层的覆盖范围（否则就是悬空）', () => {
+  // 550×450 的层只盖 11×5 = 5500mm 长的格子；550×300 的层盖得更宽
+  const pack = enginePack('40HQ', [baseRow({ L: '550', W: '450', H: '300' }, 3000, '8')], {});
+  const sol = DP.solve(pack.items, pack.container);
+  let acc = null;
+  sol.layers.forEach((t) => {
+    if (acc) {
+      assert.ok(t.cover.l <= acc.l + 1e-6 && t.cover.w <= acc.w + 1e-6,
+        '第 ' + t.boxes + ' 箱层超出下层覆盖 ' + JSON.stringify([t.cover, acc]));
+    }
+    acc = t.cover;
+  });
+});
+
+test('背包算出的上界不会低于引擎实得（否则说明层型漏了东西，不能拿去显示）', () => {
+  const r = baseRow({ L: '400', W: '300', H: '300' }, 5000, '8');
+  const pack = enginePack('40HQ', [r], {});
+  const bd = DP.bound(pack.items, pack.container);
+  assert.ok(bd.boxes >= pack.totals.loadedCount,
+    '上界 ' + bd.boxes + ' 低于实得 ' + pack.totals.loadedCount);
+});
+
 // ---------- 硬基准 ----------
 console.log('\n硬基准（写进代码注释的那个）');
 
