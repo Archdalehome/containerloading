@@ -48,6 +48,7 @@
   <div style="margin-top:6px;font-size:13px">
     选中后：<button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
     <button id="cp">复制</button> <button id="un">撤销</button>
+    <button id="pair">对扣</button>
     <span style="color:#94a3b8">（键：1/2/3 旋转 · Ctrl+C/V 复制 · Ctrl+Z 撤销）</span>
   </div>
   <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
@@ -474,6 +475,7 @@ function resettleAll() {
   const sorted = model.boxes.slice().sort((a, b) => a.z - b.z);
   const done = [];
   sorted.forEach((b) => {
+    if (b.pinned) { done.push(b); return; }   // 对扣上件：位置由对扣决定，不能重算
     const st = CL.manual.settle(Object.assign({}, b, { z: c.innerH }), done, c, itemsById);
     if (st.ok) { b.z = st.z; b.invalid = false; }
     else { b.z = 0; b.invalid = true; }   // 没有任何支撑就掉到地上，标红让人看见
@@ -547,6 +549,53 @@ function doUndo() {
   document.getElementById('r' + axis).addEventListener('click', () => doRotate(axis));
 });
 document.getElementById('cp').addEventListener('click', doCopy);
+document.getElementById('pair').addEventListener('click', doPair);
+
+/** 对扣：选中一只，自动生成翻 180° 的配对件，位置按几何算，不靠手拖 */
+function doPair() {
+  const b = model.boxes.find((x) => x.uid === selected);
+  if (!b) { say('先选中一只箱子再点对扣', true); return; }
+  const it = itemsById[b.skuId];
+  const sv = it && it.shapeValues;
+  if (!sv) { say('这只箱子没有几何数据，无法对扣', true); return; }
+  if (it.shape === 'rect') { say('矩形箱不需要对扣', true); return; }
+  if (it.shape === 'lshape' && Math.abs(sv.wlow - sv.whigh) > 1) {
+    say('这只 L 形箱台阶不对称：W低 ' + Math.round(sv.wlow) + ' / W高 ' + Math.round(sv.whigh) +
+      '，两只对扣会互相穿插（差 ' + Math.round(Math.abs(sv.wlow - sv.whigh)) + 'mm），请用配套箱填缺口', true);
+    return;
+  }
+  // 上件姿态与偏移一律由几何算：findFlipPose 给姿态，pairFit 在高度上搜出"零重叠零缝隙"的那个 z
+  const flip = CL.pack.findFlipPose(it, { m: b.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1] });
+  if (!flip) { say('这只箱子没有可用的对扣姿态', true); return; }
+  let cand = null, best = null;
+  for (let dz = 0; dz + flip.thickness <= c.innerH + 0.5; dz += 10) {
+    const trial = {
+      skuId: b.skuId, x: b.x, y: b.y, z: b.z + dz,
+      l: flip.fx, w: flip.fy, h: flip.thickness, pose: flip.m
+    };
+    const fit = CL.solid.pairFit(
+      { skuId: b.skuId, x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: b.pose },
+      trial, it, { step: 10, tol: 1 }
+    );
+    if (fit.overlap <= 1 && fit.gap <= 1) { cand = trial; best = fit; break; }
+  }
+  if (!cand) { say('对扣放不下：这段高度里找不到严丝合缝的位置', true); return; }
+  if (!CL.manual.inBounds(cand, c)) { say('对扣放不下：会超出柜内腔或门高', true); return; }
+  const others = model.boxes.filter((x) => x.uid !== b.uid);
+  for (const o of others) {
+    const oi = itemsById[o.skuId];
+    const depth = (CL.solid && CL.solid.overlapDepth) ? CL.solid.overlapDepth(cand, o, it, oi, 10) : 0;
+    if (depth > 1) { say('对扣放不下：这个位置上已有箱子挡住（重叠 ' + Math.round(depth) + 'mm）', true); return; }
+  }
+  cand.uid = model.nextId++;
+  cand.pinned = true;          // 对扣上件：重力结算不重算它的高度，否则会被吸到顶面
+  cand.pairedWith = b.uid;
+  b.paired = true;
+  model.boxes.push(cand);
+  selected = cand.uid;
+  refreshAll();
+  say('已对扣：拼合后总高 ' + Math.round(sv.hlow + sv.hhigh) + 'mm，上面可以继续叠箱');
+}
 document.getElementById('un').addEventListener('click', doUndo);
 
 // 快捷键只在画布有焦点时生效，且 preventDefault，避免吃掉页面的复制
