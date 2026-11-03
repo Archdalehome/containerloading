@@ -399,9 +399,23 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   const base = snappedBox || Object.assign({}, start, containerXY(mesh, start));
   const input = { skuId: start.skuId, x: base.x, y: base.y, z: c.innerH, l: start.l, w: start.w, h: start.h, pose: start.pose };
   const others = model.boxes.filter((b) => b.uid !== uid);
-  // 贴面落位：坐到脚下最高的、真托得住底面的那一层，再把底面的一个角对到支撑面的角上，
-  // 最后验零侵入。只点一下（没拖动）就不动箱子。
   const dropZ = (intendedZ !== undefined) ? intendedZ : start.z;
+  // 1) 自动对扣优先：同款 L 形/斜顶箱拖到附近，自己翻过来扣上去（角对齐、零侵入都由几何算）
+  const ap = moved
+    ? CL.cornerLink.autoPairOnDrop(Object.assign({}, input, { z: dropZ, uid: uid }), others, c, itemsById, { tol: 400 })
+    : { ok: false };
+  if (ap.ok) {
+    model.boxes = model.boxes.map((b) => (b.uid === uid
+      ? Object.assign(ap.box, { uid, pinned: true, pairedWith: ap.pairedWith })
+      : (b.uid === ap.pairedWith ? Object.assign({}, b, { paired: true }) : b)));
+    selected = uid;
+    refreshAll();
+    say('已自动对扣：#' + uid + ' 翻过来扣在 #' + ap.pairedWith + ' 上（水平 ' + ap.dist +
+      'mm 内自动吸附）｜角对齐 ' + ap.residual.dx + ' / ' + ap.residual.dy + ' / ' + ap.residual.dz +
+      'mm｜落点 z=' + Math.round(ap.box.z) + '｜与其它箱侵入 0mm');
+    return;
+  }
+  // 2) 普通落位：坐到支撑面 + 角对齐 + 验零侵入。只点一下（没拖动）就不动箱子。
   const pf = moved
     ? CL.cornerLink.placeOnFace(Object.assign({}, input, { z: dropZ, uid: uid }), others, c, itemsById, { tol: 150 })
     : { ok: false, reason: 'click' };
@@ -521,9 +535,9 @@ function paintSelection() {
 }
 
 // 版本标记：直接写在页面上，用来确认浏览器拿到的是不是新版本（缓存了会显示旧时间）
-const BUILD = '2026-11-03 22:45';
+const BUILD = '2026-11-03 22:55';
 const buildEl = document.getElementById('build');
-if (buildEl) buildEl.textContent = 'build ' + BUILD + ' · 拖动松手：贴面 + 角对齐 + 验零侵入';
+if (buildEl) buildEl.textContent = 'build ' + BUILD + ' · 同款 L 形/斜顶拖到 400mm 内自动对扣';
 
 /** 重力结算：自下而上让每只箱子重新落到它当下的支撑面上。
  *  拖走下面那只、删掉一只、转完姿态之后都要跑，否则上面的箱子会悬在空中——违反常识。 */
@@ -624,26 +638,11 @@ function doPair() {
       '，两只对扣会互相穿插（差 ' + Math.round(Math.abs(sv.wlow - sv.whigh)) + 'mm），请用配套箱填缺口', true);
     return;
   }
-  const mul3 = (x2, y2) => {
-    const o = new Array(9);
-    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
-      o[i * 3 + j] = x2[i * 3] * y2[j] + x2[i * 3 + 1] * y2[3 + j] + x2[i * 3 + 2] * y2[6 + j];
-    }
-    return o;
-  };
-  // 翻转轴按箱型分开（拿 solid 采样量出来的，不是推的）：
-  //   L 形：沿宽度镜像 + 翻 z（缺口朝下扣住下件的高段），落 H低，两块拼成 900×700×900 实心块
-  //   斜顶：沿长度镜像 + 翻 z（两个楔形互补），落 H底，两块拼成 L×W×(H底+H高) 实心块
-  const FLIP = it.shape === 'slope'
-    ? [-1, 0, 0, 0, 1, 0, 0, 0, -1]
-    : [1, 0, 0, 0, -1, 0, 0, 0, -1];
-  const bp = b.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1];
-  const cand = {
-    skuId: b.skuId,
-    x: b.x, y: b.y, z: b.z + sv.hlow,          // ← 角对齐就在这里：x/y 与下件完全相同
-    l: b.l, w: b.w, h: b.h,
-    pose: mul3(FLIP, bp)
-  };
+  // 翻转姿态与落点一律由 corner-link 算（拖动自动对扣用的是同一套，避免两边跑偏）：
+  //   L 形沿宽度镜像 + 翻 z，落 H低；斜顶沿长度镜像 + 翻 z，落 H底；x/y 与下件完全相同 → 四角重合
+  const ph = CL.cornerLink.pairPlacement(b, it);
+  if (!ph) { say('这只箱型没有可用的对扣姿态', true); return; }
+  const cand = Object.assign({}, b, ph);
   if (cand.h > c.doorH + 1e-6) {
     say('对扣放不下：拼合后总高 ' + Math.round(cand.h) + 'mm 超过柜门 ' + c.doorH + 'mm', true);
     return;

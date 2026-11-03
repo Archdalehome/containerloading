@@ -279,12 +279,107 @@
     };
   }
 
+  /* ---------- 对扣：翻转姿态与落点由几何定，不靠人摆 ---------- */
+
+  var IDENT = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  // 翻转轴按箱型分开（用 solid 采样量出来的）：
+  //   L 形沿宽度镜像 + 翻 z；斜顶沿长度镜像 + 翻 z
+  var FLIP = {
+    lshape: [1, 0, 0, 0, -1, 0, 0, 0, -1],
+    slope: [-1, 0, 0, 0, 1, 0, 0, 0, -1]
+  };
+
+  function mul3(a, b) {
+    var o = new Array(9);
+    for (var i = 0; i < 3; i++) {
+      for (var j = 0; j < 3; j++) {
+        o[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+      }
+    }
+    return o;
+  }
+
+  /**
+   * 配对件（倒扣件）的位置与姿态：x/y 与下件完全相同 → 四个角严格重合；
+   * z 抬 H低（L 形）/ H底（斜顶）→ 缺口正好扣住下件的凸起，两块互补成实心块。
+   */
+  function pairPlacement(lower, item) {
+    if (!item || !item.shapeValues) return null;
+    var flip = FLIP[item.shape];
+    if (!flip) return null;                       // 矩形箱不需要对扣
+    var sv = item.shapeValues;
+    return {
+      x: lower.x, y: lower.y, z: lower.z + sv.hlow,
+      l: lower.l, w: lower.w, h: lower.h,
+      pose: mul3(flip, lower.pose || IDENT)
+    };
+  }
+
+  function sameShape(a, b) {
+    if (!a || !b || a.shape !== b.shape) return false;
+    var x = a.shapeValues || {}, y = b.shapeValues || {};
+    var keys = ['l', 'w', 'wlow', 'whigh', 'hlow', 'hhigh'];
+    for (var i = 0; i < keys.length; i++) {
+      if (Math.abs((x[keys[i]] || 0) - (y[keys[i]] || 0)) > 1) return false;
+    }
+    return true;
+  }
+
+  /**
+   * 拖到附近就自动对扣：找同箱型、且本箱落在它水平 tol 范围内的下件，
+   * 算出配对件的姿态与落点（角已对齐），逐只采样验零侵入，通过就返回。
+   * 这是"现场把箱子翻过来扣上去"那一下，不需要人手对齐。
+   */
+  function autoPairOnDrop(box, placed, c, itemsById, opts) {
+    var tol = (opts && opts.tol !== undefined) ? opts.tol : 400;
+    var item = itemsById && itemsById[box.skuId];
+    if (!item || !FLIP[item.shape]) return { ok: false, reason: 'no-pair-shape', message: '这个箱型不需要对扣' };
+    var best = null;
+    (placed || []).forEach(function (o) {
+      if (o.uid === box.uid) return;
+      var oi = itemsById && itemsById[o.skuId];
+      if (!sameShape(item, oi)) return;          // 只和同款箱对扣：不同尺寸扣不严
+      if (o.paired) return;                      // 已经配过对的别再叠一层
+      var t = pairPlacement(o, item);
+      if (!t) return;
+      var d = Math.sqrt(Math.pow(t.x - box.x, 2) + Math.pow(t.y - box.y, 2));
+      if (d > tol) return;
+      var cand = Object.assign({}, box, t, { uid: box.uid });
+      if (cand.h > c.doorH + EPS) return;
+      if (cand.x < -EPS || cand.y < -EPS ||
+          cand.x + cand.l > c.innerL + EPS || cand.y + cand.w > c.innerW + EPS ||
+          cand.z + cand.h > c.innerH + EPS) return;
+      var bad = false;
+      (placed || []).forEach(function (p) {
+        if (bad || p.uid === box.uid) return;
+        if (M.overlaps(cand, p, itemsById)) bad = true;
+      });
+      if (bad) return;
+      if (!best || d < best.dist) best = { box: cand, lower: o, dist: Math.round(d * 10) / 10 };
+    });
+    if (!best) return { ok: false, reason: 'no-pair', message: '附近 ' + tol + 'mm 内没有可对扣的同款箱' };
+    return {
+      ok: true,
+      box: best.box,
+      pairedWith: best.lower.uid,
+      dist: best.dist,
+      // 角对齐是构造出来的：x/y 与下件完全相同
+      residual: {
+        dx: r1(best.box.x - best.lower.x),
+        dy: r1(best.box.y - best.lower.y),
+        dz: r1(best.box.z - (best.lower.z + (item.shapeValues.hlow)))
+      }
+    };
+  }
+
   NS.cornerLink = {
     cornersOf: cornersOf,
     contactAt: contactAt,
     link: link,
     alignOnDrop: alignOnDrop,
-    placeOnFace: placeOnFace
+    placeOnFace: placeOnFace,
+    pairPlacement: pairPlacement,
+    autoPairOnDrop: autoPairOnDrop
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = NS.cornerLink;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
