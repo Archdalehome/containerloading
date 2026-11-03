@@ -590,7 +590,8 @@ function doPair() {
         { skuId: b.skuId, x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: b.pose },
         trial, it, { step: 10, tol: 1 }
       );
-      if (fit.overlap <= 1 && fit.gap <= 1) { cand = trial; break outer; }
+      // 放宽：有接触即可（缝隙 ≤20mm 算贴合），但绝不能互相穿插
+      if (fit.overlap <= 1 && fit.gap <= 20) { cand = trial; break outer; }
     }
   }
   if (!cand) { say('对扣放不下：这段高度里找不到严丝合缝的位置', true); return; }
