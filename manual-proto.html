@@ -16,6 +16,12 @@
 <div id="hud">
   手动装柜原型 · 拖一只箱子：松手会<b>沉降 + 吸附</b>，越界或重叠会<b>回弹</b>并写明原因
   <div style="margin-top:6px;font-size:13px">
+    柜型：<select id="ctn">
+      <option>20GP</option><option>40GP</option><option>40HQ</option><option>45HQ</option>
+    </select>
+    <span id="dims" style="color:#94a3b8;margin-left:8px"></span>
+  </div>
+  <div style="margin-top:6px;font-size:13px">
     选中后：<button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
     <button id="cp">复制</button> <button id="un">撤销</button>
     <span style="color:#94a3b8">（键：1/2/3 旋转 · Ctrl+C/V 复制 · Ctrl+Z 撤销）</span>
@@ -48,7 +54,17 @@
 <script type="module">
 import * as THREE from './vendor/three.module.min.js';
 
-const c = CL.containers.get('40HQ');
+// 柜型切换：换柜型直接带参数重载，线框 / 相机取景 / 射线平面 / 标注一起重建，
+// 不留半新半旧的场景状态。柜型确定 = 尺寸确定，本来就该整场重建。
+const ctnKey = new URLSearchParams(location.search).get('container') || '40HQ';
+const ctnSel = document.getElementById('ctn');
+if (ctnSel) {
+  ctnSel.value = ctnKey;
+  ctnSel.addEventListener('change', () => { location.search = '?container=' + ctnSel.value; });
+}
+const c = CL.containers.get(ctnKey);
+document.getElementById('dims').textContent =
+  '内长 ' + c.innerL + ' × 内宽 ' + c.innerW + ' × 内高 ' + c.innerH + ' · 门高 ' + c.doorH;
 const statusEl = document.getElementById('status');
 const say = (msg, bad) => {
   statusEl.textContent = '状态：' + msg;
