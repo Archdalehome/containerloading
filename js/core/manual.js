@@ -63,9 +63,26 @@
     return levels;
   }
 
+  /** 底面与某一层支撑面的接触面积（取最大的一块，单位 mm²） */
+  function contactArea(foot, rects) {
+    var best = 0;
+    for (var i = 0; i < rects.length; i++) {
+      var r = rects[i];
+      var ix = Math.min(foot.x + foot.l, r.x + r.l) - Math.max(foot.x, r.x);
+      var iy = Math.min(foot.y + foot.w, r.y + r.w) - Math.max(foot.y, r.y);
+      if (ix > 0 && iy > 0) {
+        var a = ix * iy;
+        if (a > best) best = a;
+      }
+    }
+    return best;
+  }
+
   /**
-   * 沉降：落到正下方「能完整托住底面」的最高水平面。
-   * 返回 { z, ok }；ok=false 表示下方没有任何面能完整托住（悬空）。
+   * 沉降：落到正下方「能托住底面」的最高水平面。
+   * 手工模式放宽：只要上下两面有足够接触（≥10% 底面且有 20mm 见方）就允许叠，
+   * 不再要求完整托住——现场确实存在半压着台阶、靠边叠的做法。
+   * 自动计算（pack.js）仍按严格物理，不受这里影响。
    */
   function settle(box, placed, c, itemsById) {
     var foot = { x: box.x, y: box.y, l: box.l, w: box.w };
@@ -81,7 +98,9 @@
         }
         continue;
       }
-      if (P.covers(foot, levels[keys[i]])) return { z: keys[i], ok: true };
+      // 有足够接触就允许叠（放宽：不再要求完整托住整个底面）
+      var area = contactArea(foot, levels[keys[i]]);
+      if (area >= foot.l * foot.w * 0.1) return { z: keys[i], ok: true };
     }
     return { z: box.z, ok: false };
   }

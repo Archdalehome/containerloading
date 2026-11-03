@@ -65,11 +65,11 @@ test('拒绝：与已有箱体重叠（贴齐范围外，仍压在低位）', ()
   assert.strictEqual(r.reason, 'overlap');
 });
 
-test('低位放不稳也只会沉到柜底，不会悬空', () => {
-  const placed = [mk(0, 0, 0, 100, 100, 300)]; // 100×100 的小箱托不住 400×300
+test('小面积接触也允许叠（手工模式放宽到"有接触即可"）', () => {
+  const placed = [mk(0, 0, 0, 100, 100, 300)]; // 100×100 的小箱
   const r = M.tryPlace(mk(0, 0, 300), placed, c, itemsById);
-  assert.ok(r.box.z === 0 || r.reason === 'overlap', '应沉到柜底或与底部箱重叠，实际 ' + r.reason + ' z=' + r.box.z);
-  assert.notStrictEqual(r.reason, 'no-support', '柜底总能托住，不该报无支撑');
+  assert.ok(r.ok, '有接触就应该允许叠，实际 ' + r.reason);
+  assert.strictEqual(r.box.z, 300, '应落在小箱顶面 z=300，实际 ' + r.box.z);
 });
 
 test('三轴旋转各 90°：外廓体积不变，三轴各换一次', () => {
@@ -162,9 +162,10 @@ test('L 高段顶可以叠小箱：落在 z=600', () => {
   assert.strictEqual(r.box.z, 600, '应落在高段顶 600，实际 ' + r.box.z);
 });
 
-test('跨高低两段的底面必须拒绝（一半悬在台阶上）', () => {
+test('跨高低两段的底面允许叠（有接触即可）', () => {
   const r = M.tryPlace({ skuId: 'm', x: 0, y: 200, z: 900, l: 400, w: 400, h: 300 }, [bigL], c, by2);
-  assert.strictEqual(r.ok, false, '跨台阶应拒绝，实际 ok=' + r.ok + ' z=' + (r.box && r.box.z));
+  assert.ok(r.ok, '有接触就允许叠，实际 ' + r.reason);
+  assert.ok(r.box.z > 0, '应停在台阶/阶梯面上，实际 z=' + r.box.z);
 });
 
 console.log('\n' + pass + ' 通过，' + fail + ' 失败\n');
