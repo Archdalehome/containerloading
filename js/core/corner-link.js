@@ -242,13 +242,15 @@
     }
     var cand = Object.assign({}, box, { z: pick.z });
     // 逐轴找边对齐：x、y 各自独立，取"位移最小"的那条边；箱型/尺寸不同也照样能用。
-    // 一个轴上一个候选都没有时（比如落在很大的柜底上），退而贴支撑面最近的边，
-    // 保证落点永远是确定的，不会停在"差几十毫米"的含糊位置。
+    // 柜壁默认**不参与**吸附：柜体轮廓离得远，一吸就跳，拖起来会像被轮廓线拽住。
+    var useWalls = !!(opts && opts.walls);
     function edgeCandidates(axis, cur, size, rect) {
       var out = [];
       var lo = axis === 'x' ? c.innerL : c.innerW;
-      out.push({ d: 0 - cur, tag: '柜壁0' });
-      out.push({ d: (lo - size) - cur, tag: '柜壁max' });
+      if (useWalls) {
+        out.push({ d: 0 - cur, tag: '柜壁0' });
+        out.push({ d: (lo - size) - cur, tag: '柜壁max' });
+      }
       if (rect) {
         var r0 = axis === 'x' ? rect.x : rect.y;
         var r1 = r0 + (axis === 'x' ? rect.l : rect.w);
@@ -281,8 +283,12 @@
     var aligned = { dx: 0, dy: 0, moved: false, x: null, y: null };
     if (ex && Math.abs(ex.d) <= tol) { cand.x += ex.d; aligned.dx = r1(ex.d); aligned.x = ex.tag; }
     if (ey && Math.abs(ey.d) <= tol) { cand.y += ey.d; aligned.dy = r1(ey.d); aligned.y = ey.tag; }
-    // 没有近的边 → 直接贴支撑面最近的一条边（不是柜底时），落点仍然确定
-    if (pick.rect && pick.rect.owner !== 'floor') {
+    // 兜底贴边：只在"确实放在某只箱子的顶面上、而且几乎盖满它"时才做。
+    // 落在大柜底或大半悬空时强行贴边，会让箱子在手底下乱跳，拖起来很不顺。
+    var faceArea = Math.max(1, pick.rect.l * pick.rect.w);
+    var coverage = (cand.l * cand.w) / faceArea;   // 这一箱盖住了支撑面的多少
+    var wantFlush = !(opts && opts.flush === false) && pick.rect && pick.rect.owner !== 'floor' && coverage >= 0.8;
+    if (wantFlush) {
       if (!aligned.x) {
         var r0x = pick.rect.x, r1x = r0x + pick.rect.l;
         var dLeft = r0x - cand.x, dRight = (r1x - cand.l) - cand.x;

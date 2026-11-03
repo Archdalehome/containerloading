@@ -109,14 +109,27 @@ test('不同尺寸叠放：小箱落在大箱顶面，至少一条边自动贴�
   assert.ok(r.aligned.moved, '必须发生边对齐');
 });
 
-test('落在支撑面中间（离边都很远）：贴支撑面最近的一条边，落点仍然确定', () => {
+test('落在很大的支撑面中间：不强制贴边（贴边会让拖动时乱跳）', () => {
   const items = { big: rect('big', 2000, 1000, 400), sm: rect('sm', 300, 300, 300) };
   const big = box('big', 0, 0, 0, 2000, 1000, 400, 'G1');
   const drop = box('sm', 850, 350, 300, 300, 300, 300, 'S1');
   const r = L.placeOnFace(drop, [big], c, items, { tol: 150 });
   assert.ok(r.ok, r.message);
-  assert.strictEqual(r.box.x, 0, '应贴到支撑面边上，实际 x=' + r.box.x);
-  assert.strictEqual(r.aligned.moved, true);
+  assert.deepStrictEqual([r.box.x, r.box.y], [850, 350], '应保持放下时的位置');
+  assert.strictEqual(r.aligned.moved, false, '不该强行贴边');
+});
+
+test('小箱几乎盖满支撑面：至少贴到支撑面的一条边（位置确定）', () => {
+  const items = { big: rect('big', 400, 300, 300), sm: rect('sm', 380, 280, 300) };
+  const big = box('big', 0, 0, 0, 400, 300, 300, 'G1');
+  const drop = box('sm', 13, 11, 300, 380, 280, 300, 'S1');
+  const r = L.placeOnFace(drop, [big], c, items, { tol: 150 });
+  assert.ok(r.ok, r.message);
+  const flushX = Math.abs(r.box.x) < 0.001 || Math.abs(r.box.x + 380 - 400) < 0.001;
+  const flushY = Math.abs(r.box.y) < 0.001 || Math.abs(r.box.y + 280 - 300) < 0.001;
+  assert.ok(flushX, 'x 应贴住支撑面的某条边，实际 ' + r.box.x);
+  assert.ok(flushY, 'y 应贴住支撑面的某条边，实际 ' + r.box.y);
+  assert.ok(r.aligned.moved, '应发生贴边');
 });
 
 test('只有柜底时不做无底线吸附：落点保持原样', () => {

@@ -158,15 +158,18 @@ const toScene = (x, y, z) => new THREE.Vector3(x - L / 2, y, z - W / 2);
 const world = new THREE.Group();
 scene.add(world);
 let floor = null;
+let wireMat = null;
 function rebuildScene() {
   while (world.children.length) {
     const o = world.children.pop();
     if (o.geometry) o.geometry.dispose();
   }
   L = c.innerL; H = c.innerH; W = c.innerW;
+  // 柜体轮廓线单独留一份材质：拖动时把它调淡，免得线条穿过纸箱干扰判断
+  wireMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.85 });
   world.add(new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(L, H, W)),
-    new THREE.LineBasicMaterial({ color: 0x38bdf8 })
+    wireMat
   ).translateY(H / 2));
   floor = new THREE.Mesh(
     new THREE.PlaneGeometry(L, W),
@@ -275,6 +278,7 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
     hits[0].object.position.x - hitPoint.x, 0, hits[0].object.position.z - hitPoint.z
   );
   dragging = { uid, mesh: hits[0].object, start: b, planeY, downX: ev.clientX, downY: ev.clientY, zOff: null };
+  if (wireMat) wireMat.opacity = 0.22;      // 拖动时把柜体轮廓调淡，别挡视线
   hits[0].object.material = ghostMat;
   renderer.domElement.setPointerCapture(ev.pointerId);
   say('拖动中：滚轮可上下调落点高度，松手落位');
@@ -450,6 +454,7 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   const failMsg = dragging.previewFail;
   const moved = dragging.moved === true;   // 只是点一下（没拖动）就别动它
   dragging = null;
+  if (wireMat) wireMat.opacity = 0.85;      // 松手恢复柜体轮廓
   mesh.material = matFor(start.skuId);
   if (!moved) return;                      // 单击只负责选中，不动箱子
   if (!pv) {
@@ -564,7 +569,7 @@ function paintSelection() {
 }
 
 // 版本标记：直接写在页面上，用来确认浏览器拿到的是不是新版本（缓存了会显示旧时间）
-const BUILD = '2026-11-03 23:40';
+const BUILD = '2026-11-03 23:55';
 const buildEl = document.getElementById('build');
 if (buildEl) buildEl.textContent = 'build ' + BUILD;
 
