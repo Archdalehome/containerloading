@@ -78,8 +78,12 @@
   }
 
   /**
-   * 允许的姿态：水平旋转始终允许；侧放（L/W 朝上）要开关；任何「底面朝上」的姿态要可倒放。
-   * 按 item 生成并去重，顺序固定，便于复现。
+   * 允许的姿态：按几何判定，不按开关猜。
+   *   1. 六个面哪个朝下，先筛掉「底面放不平」的：矩形 6 种全留；
+   *      斜顶剔除斜面朝下（5 种）；L 形剔除台阶面朝下（5 种）——这两种朝下时底面是斜面/台阶，
+   *      现实里放不住。
+   *   2. 用户的勾选只做减法：不勾「可侧放」剔掉侧面朝下的，不勾「可倒放」剔掉顶面朝下的。
+   *      默认两个都允许（用户 2026-11 决定：现实里可以任意方向摆，只要求不悬空、不穿插）。
    */
   function posesFor(item) {
     var out = [];
@@ -97,16 +101,16 @@
         }
       }
       if (vertical === -1) continue;
-      var isSide = vertical !== 2;
-      var isFlip = upSign < 0;
 
-      // 斜顶箱只允许正放与配对用倒放：侧放后顶面不是完整水平面，叠不了，没有实用价值
-      if (item.shape === 'slope' && isSide) continue;
+      // 顶面朝下：矩形无所谓；斜顶是斜面朝下、L 形是台阶面朝下，底面积不满，摆不平
+      if (item.shape !== 'rect' && vertical === 2 && upSign < 0) continue;
+
+      var isSide = vertical !== 2;
+      var isFlip = vertical === 2 && upSign < 0; // 只有「顶面朝下」才算倒放
       if (isSide && !item.allowSide) continue;
       if (isFlip && !item.allowFlip) continue;
-      // H 朝上但底朝上（即倒放）已在 isFlip 里处理；侧放且底朝上同样需要可倒放
 
-      var key = vertical + '|' + dims.fx + '|' + dims.fy + '|' + (isFlip ? 1 : 0);
+      var key = vertical + '|' + dims.fx + '|' + dims.fy + '|' + (upSign > 0 ? 1 : 0);
       if (seen[key]) continue;
       seen[key] = true;
       out.push({
@@ -250,30 +254,143 @@
   }
 
   /**
-   * 一只箱子提供的水平承重面。
-   *   - 斜顶箱：斜面不能承重；只有对扣上件（倒放）的顶面是平的，可以承重
-   *   - L 形箱：正放时高段顶面（H高）与台阶顶面（H低）都是水平面；侧放/倒放不给承重面（保守）
-   *   - 矩形箱：顶面
+   * 一只箱子的真实接触面（相对它自己的左前下角）：
+   *   bottom = 真正贴地的那几块矩形；top = 真正朝上、能承重的那几块矩形（带相对高度 z）。
+   *
+   * 为什么不能用外接体：侧放、倒扣之后，外接体的顶面往往有一半是空的，
+   * 拿它当承重面会让上面的箱子悬空。这里按真实几何算。
+   *   快速路径：矩形任意姿态、正放的斜顶 / L 形（截面规则，直接给矩形）
+   *   其余：25mm 网格采样实体高度，再按等高把格子合并成矩形
    */
+  var FACE_CACHE = {};
+
+  function facesRel(item, pose, fx, fy, thickness) {
+    var sv = item.shapeValues || item.bbox;
+    // 缓存键必须带尺寸：同一个 id 在不同用例里可能换了参数（测试里就这么用）
+    var key = item.id + '|' + [sv.l, sv.w, sv.h, sv.wlow, sv.whigh, sv.hlow, sv.hhigh].join(',') +
+      '|' + (pose ? pose.join(',') : 'id') + '|' + fx + 'x' + fy;
+    if (FACE_CACHE[key]) return FACE_CACHE[key];
+    var out = { bottom: [], top: [] };
+    var m = pose || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    var vertical = 2;
+    var upSign = 1;
+    for (var a = 0; a < 3; a++) {
+      if (Math.abs(m[2 * 3 + a]) > 0.5) { vertical = a; upSign = m[2 * 3 + a] > 0 ? 1 : -1; }
+    }
+
+    if (item.shape === 'rect') {
+      out.bottom.push({ x: 0, y: 0, l: fx, w: fy, z: 0 });
+      out.top.push({ x: 0, y: 0, l: fx, w: fy, z: thickness });
+      FACE_CACHE[key] = out;
+      return out;
+    }
+
+    if (item.shape === 'lshape' && vertical === 2 && upSign > 0) {
+      // 正放 L：底面是完整的 L×W；顶面两段——高段 H高、台阶 H低
+      out.bottom.push({ x: 0, y: 0, l: fx, w: fy, z: 0 });
+      var ax = -1;
+      for (var b = 0; b < 3; b++) if (Math.abs(m[0 * 3 + b]) > 0.5) ax = b;
+      var ay = -1;
+      for (var c = 0; c < 3; c++) if (Math.abs(m[1 * 3 + c]) > 0.5) ay = c;
+      // 深度方向（局部 y）映射到容器的哪根轴、正反向
+      var dAxis = ay; // 局部 y
+      var dSign = m[1 * 3 + ay] > 0 ? 1 : -1;
+      var dLen = fy;
+      var dDepth = ay === 0 ? fx : fy; // 容器 x/y 里深度那根的长度
+      var lowOff = dSign > 0 ? 0 : dDepth - sv.wlow;
+      var highOff = dSign > 0 ? sv.wlow : 0;
+      var highLen = dDepth - sv.wlow;
+      var seg = function (off, len, z) {
+        var r = { x: 0, y: 0, l: fx, w: fy, z: z };
+        if (ay === 0) { r.l = len; r.x = off; } else { r.w = len; r.y = off; }
+        return r;
+      };
+      out.top.push(seg(highOff, highLen, sv.h));
+      out.top.push(seg(lowOff, sv.wlow, sv.hlow));
+      FACE_CACHE[key] = out;
+      return out;
+    }
+
+    if (item.shape === 'slope' && vertical === 2 && upSign > 0) {
+      // 正放斜顶：底面完整；顶面是斜面，不能承重
+      out.bottom.push({ x: 0, y: 0, l: fx, w: fy, z: 0 });
+      FACE_CACHE[key] = out;
+      return out;
+    }
+
+    // 通用路径：采样实体高度，找出真正贴地和真正朝上的面
+    var step = Math.min(25, Math.max(5, Math.min(fx, fy) / 12));
+    var nx = Math.max(1, Math.ceil(fx / step));
+    var ny = Math.max(1, Math.ceil(fy / step));
+    var probe = { x: 0, y: 0, z: 0, l: fx, w: fy, h: thickness, pose: m };
+    var cellLo = new Array(nx * ny);
+    var cellHi = new Array(nx * ny);
+    var maxZ = 0;
+    for (var i = 0; i < nx; i++) {
+      for (var j = 0; j < ny; j++) {
+        var span = SOLID.spanAt(probe, item, (i + 0.5) * fx / nx, (j + 0.5) * fy / ny);
+        var idx = j * nx + i;
+        if (!span) { cellLo[idx] = null; continue; }
+        cellLo[idx] = span[0];
+        cellHi[idx] = span[1];
+        if (span[1] > maxZ) maxZ = span[1];
+      }
+    }
+    var cellW = fx / nx;
+    var cellD = fy / ny;
+    var extract = function (pick, target) {
+      var used = new Uint8Array(nx * ny);
+      for (var j2 = 0; j2 < ny; j2++) {
+        for (var i2 = 0; i2 < nx; i2++) {
+          var k = j2 * nx + i2;
+          if (used[k]) continue;
+          var h = pick(k);
+          if (h === null) continue;
+          // 往右扩
+          var i3 = i2;
+          while (i3 + 1 < nx && !used[j2 * nx + i3 + 1] && pick(j2 * nx + i3 + 1) === h) i3++;
+          // 往下扩（每一行区间必须完全一致）
+          var j3 = j2;
+          while (j3 + 1 < ny) {
+            var okRow = true;
+            for (var q = i2; q <= i3; q++) {
+              if (used[(j3 + 1) * nx + q] || pick((j3 + 1) * nx + q) !== h) { okRow = false; break; }
+            }
+            if (!okRow) break;
+            j3++;
+          }
+          for (var jj = j2; jj <= j3; jj++) {
+            for (var ii = i2; ii <= i3; ii++) used[jj * nx + ii] = 1;
+          }
+          target.push({ x: i2 * cellW, y: j2 * cellD, l: (i3 - i2 + 1) * cellW, w: (j3 - j2 + 1) * cellD, z: h });
+        }
+      }
+    };
+    extract(function (k) { return cellLo[k] === null ? null : (cellLo[k] <= 1 ? 0 : null); }, out.bottom);
+    extract(function (k) {
+      if (cellHi[k] === undefined) return null;
+      return (Math.abs(cellHi[k] - maxZ) <= 1) ? Math.round(cellHi[k]) : null;
+    }, out.top);
+    FACE_CACHE[key] = out;
+    return out;
+  }
+
+  /** 这一箱的真实底面（容器坐标） */
+  function bottomRectsOf(item, p) {
+    if (!item) return [{ x: p.x, y: p.y, l: p.l, w: p.w }];
+    var f = facesRel(item, p.pose, p.l, p.w, p.h);
+    return f.bottom.map(function (r) {
+      return { x: p.x + r.x, y: p.y + r.y, l: r.l, w: r.w };
+    });
+  }
+
+  /** 一只箱子提供的水平承重面（真实顶面，侧放/倒扣按几何算） */
   function surfacesOf(item, p) {
     if (!item) return [];
-    var sv = item.shapeValues;
-    var full = { x: p.x, y: p.y, l: p.l, w: p.w };
-    if (item.shape === 'slope') {
-      if (p.kind === 'pair-upper') return [{ z: p.z + p.h, rect: full }];
-      return [];
-    }
-    if (item.shape === 'lshape') {
-      if (p.kind === 'pair-upper-l') return [{ z: p.z + p.h, rect: full }];
-      if (!p.pose || p.pose[8] !== 1) return [];
-      var tall = mapLocalRect(item, p, 0, sv.l, sv.wlow, sv.w, sv.h);
-      var step = mapLocalRect(item, p, 0, sv.l, 0, sv.wlow, sv.hlow);
-      return [
-        { z: p.z + sv.h, rect: tall },
-        { z: p.z + sv.hlow, rect: step }
-      ];
-    }
-    return [{ z: p.z + p.h, rect: full }];
+    var f = facesRel(item, p.pose, p.l, p.w, p.h);
+    return f.top.map(function (r) {
+      return { z: p.z + r.z, rect: { x: p.x + r.x, y: p.y + r.y, l: r.l, w: r.w } };
+    });
   }
 
   /** 叠放诊断：这个箱型能不能往上叠，为什么 */
@@ -469,6 +586,20 @@
       return covers({ x: x, y: y, l: l, w: w }, rects);
     }
 
+    /** 按真实底面判断支撑：侧放的箱子底面可能只占外接体的一部分，不能拿外接体蒙过去 */
+    function supportedAtFor(item, pose, x, y, zz) {
+      if (zz <= EPS) return true;
+      var rects = topIndex[keyOf(zz)];
+      if (!rects || !rects.length) return false;
+      var f = facesRel(item, pose ? pose.m || pose : null, pose ? pose.fx : item.bbox.l,
+        pose ? pose.fy : item.bbox.w, pose ? pose.thickness : item.bbox.h);
+      for (var i = 0; i < f.bottom.length; i++) {
+        var r = f.bottom[i];
+        if (!covers({ x: x + r.x, y: y + r.y, l: r.l, w: r.w }, rects)) return false;
+      }
+      return true;
+    }
+
     function weightRoom() {
       if (!weightKnown) return Infinity;
       return Math.max(0, c.payload - usedWeight);
@@ -518,7 +649,7 @@
           for (var cc = 0; cc < best.nx && n < limit; cc++) {
             var bx = band.x + cc * best.pose.fx;
             var by = band.y + r * best.pose.fy;
-            if (!supportedAt(bx, by, best.pose.fx, best.pose.fy, layerZ)) continue;
+            if (!supportedAtFor(cand, best.pose, bx, by, layerZ)) continue;
             var sp = {
               skuId: cand.id, index: items.indexOf(cand),
               col: cc + 1, row: r + 1,
@@ -643,7 +774,7 @@
           for (var pc = 0; pc < nx && pairsPlaced < maxPairs; pc++) {
             var px = pc * pair.lower.fx;
             var py = pr * pair.lower.fy;
-            if (!supportedAt(px, py, pair.lower.fx, pair.lower.fy, layerZ)) continue;
+            if (!supportedAtFor(cand, pair.lower, px, py, layerZ)) continue;
             var lower = {
               skuId: cand.id, index: items.indexOf(cand), col: pc + 1, row: pr + 1,
               x: px, y: py, z: layerZ, l: pair.lower.fx, w: pair.lower.fy, h: pair.lower.thickness,
@@ -670,7 +801,7 @@
           for (var col = 0; col < nx && placed < room; col++) {
             var bx = col * candPose.fx;
             var by = r * candPose.fy;
-            if (!supportedAt(bx, by, candPose.fx, candPose.fy, layerZ)) continue;
+            if (!supportedAtFor(cand, candPose, bx, by, layerZ)) continue;
             var p = {
               skuId: cand.id, index: items.indexOf(cand), col: col + 1, row: r + 1,
               x: bx, y: by, z: layerZ, l: candPose.fx, w: candPose.fy, h: candPose.thickness,
@@ -739,7 +870,7 @@
               var fy0 = strip.y + fr * filler.pose.fy;
               if (fx0 + filler.pose.fx > strip.x + strip.l + EPS) continue;
               if (fy0 + filler.pose.fy > strip.y + strip.w + EPS) continue;
-              if (!supportedAt(fx0, fy0, filler.pose.fx, filler.pose.fy, z)) continue;
+              if (!supportedAtFor(filler.item, filler.pose, fx0, fy0, z)) continue;
               if (filler.pose.thickness > thickness + EPS) continue;
               var fp = {
                 skuId: filler.item.id, index: items.indexOf(filler.item),
@@ -794,7 +925,7 @@
                 var gy = notch.y + nr * nf.pose.fy;
                 if (gx + nf.pose.fx > notch.x + notch.l + EPS) continue;
                 if (gy + nf.pose.fy > notch.y + notch.w + EPS) continue;
-                if (!supportedAt(gx, gy, nf.pose.fx, nf.pose.fy, stepZ)) continue;
+                if (!supportedAtFor(nf.item, nf.pose, gx, gy, stepZ)) continue;
                 var np = {
                   skuId: nf.item.id, index: items.indexOf(nf.item),
                   col: nc + 1, row: nr + 1,
@@ -1364,6 +1495,9 @@
     validatePhysics: validatePhysics,
     stepSurface: stepSurface,
     pairFeasible: pairFeasible,
+    facesRel: facesRel,
+    surfacesOf: surfacesOf,
+    bottomRectsOf: bottomRectsOf,
     // 兼容旧接口
     bestOrientation: function (bb, c) {
       var a = { nx: Math.floor((c.innerL + EPS) / bb.l), ny: Math.floor((c.innerW + EPS) / bb.w), rot: 0, l: bb.l, w: bb.w };

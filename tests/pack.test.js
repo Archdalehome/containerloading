@@ -92,6 +92,116 @@ function assertSupported(pack, label) {
   });
 }
 
+// ---------- 默认不限方向（2026-11 用户决定） ----------
+console.log('\n默认不限方向：姿态按几何判定，物理约束不放松');
+
+function poseCount(shape, values, allowSide, allowFlip) {
+  const item = {
+    id: 'x' + shape, shape, shapeName: shape, index: 0,
+    shapeValues: { l: values.l, w: values.w, h: values.h || values.hhigh, wlow: values.wlow, whigh: values.whigh, hlow: values.hlow, hhigh: values.hhigh },
+    bbox: { l: values.l, w: values.w, h: values.h || values.hhigh },
+    allowSide: allowSide !== false, allowFlip: allowFlip !== false, placeable: true
+  };
+  return P.posesFor(item).length;
+}
+
+/** 有几种「哪个面朝下」（同一种朝下可能有两种水平旋转，这里只数面） */
+function faceCount(shape, values) {
+  const item = {
+    id: 'xf' + shape, shape, shapeName: shape, index: 0,
+    shapeValues: { l: values.l, w: values.w, h: values.h || values.hhigh, wlow: values.wlow, whigh: values.whigh, hlow: values.hlow, hhigh: values.hhigh },
+    bbox: { l: values.l, w: values.w, h: values.h || values.hhigh },
+    allowSide: true, allowFlip: true, placeable: true
+  };
+  const set = {};
+  P.posesFor(item).forEach((p) => { set[p.vertical + '|' + (p.s[p.vertical] > 0 ? 1 : 0)] = 1; });
+  return Object.keys(set).length;
+}
+
+test('姿态集合按几何判定：矩形 6 面、斜顶 5 面、L 形 5 面（斜面/台阶面朝下剔除）', () => {
+  assert.strictEqual(faceCount('rect', { l: 600, w: 400, h: 300 }), 6, '矩形应 6 面');
+  assert.strictEqual(faceCount('slope', { l: 600, w: 400, hlow: 300, hhigh: 500 }), 5, '斜顶应 5 面');
+  assert.strictEqual(faceCount('lshape', { l: 600, w: 400, wlow: 160, whigh: 240, hlow: 300, hhigh: 500 }), 5, 'L 形应 5 面');
+});
+
+test('用户勾选只做减法：不勾倒放就没有顶面朝下，不勾侧放就只剩底面朝下', () => {
+  const rectItem = (allowSide, allowFlip) => ({
+    id: 'xt' + allowSide + allowFlip, shape: 'rect', shapeName: '矩形', index: 0,
+    shapeValues: { l: 600, w: 400, h: 300 }, bbox: { l: 600, w: 400, h: 300 },
+    allowSide, allowFlip, placeable: true
+  });
+  const noFlip = P.posesFor(rectItem(true, false));
+  assert.ok(noFlip.every((p) => !(p.vertical === 2 && p.s[2] < 0)), '不勾倒放时仍有顶面朝下的姿态');
+  assert.ok(noFlip.length < P.posesFor(rectItem(true, true)).length, '不勾倒放没有减少姿态');
+
+  const noSide = P.posesFor(rectItem(false, true));
+  assert.ok(noSide.every((p) => p.vertical === 2), '不勾侧放时还有侧面朝下的姿态');
+
+  const slopeItem = {
+    id: 'xs', shape: 'slope', shapeName: '斜顶', index: 0,
+    shapeValues: { l: 600, w: 400, h: 500, hlow: 300, hhigh: 500 }, bbox: { l: 600, w: 400, h: 500 },
+    allowSide: false, allowFlip: false, placeable: true
+  };
+  assert.ok(P.posesFor(slopeItem).every((p) => p.vertical === 2 && p.s[2] > 0), '斜顶限制方向后应只剩底面朝下');
+});
+
+test('默认全不限：40HQ 400×300×300 装满 1820 箱、40GP 1610 箱', () => {
+  const mk = () => {
+    const r = row('a', { L: '400', W: '300', H: '300' }, 5000);
+    r.allowSide = true;
+    r.allowFlip = true;
+    return [r];
+  };
+  const r1 = P.runPlans(state(C.get('40HQ'), mk()));
+  assert.strictEqual(r1.best.boxes, 1820, '40HQ 默认应 1820，实际 ' + r1.best.boxes);
+  const r2 = P.runPlans(state(C.get('40GP'), mk()));
+  assert.strictEqual(r2.best.boxes, 1610, '40GP 默认应 1610，实际 ' + r2.best.boxes);
+});
+
+test('45% 那单：40GP + L 600×400(160/240) 302 箱 → 仍装 302，垫块是关键', () => {
+  const mk = () => {
+    const r = row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 302, '', 'lshape');
+    r.allowSide = true;
+    r.allowFlip = true;
+    return r;
+  };
+  const withDun = P.runPlans({ container: C.get('40GP'), rows: [mk()], options: { allowDunnage: true } });
+  assert.strictEqual(withDun.best.boxes, 302, '开垫块时应 302 全装，实际 ' + withDun.best.boxes);
+  assert.ok(Math.abs(withDun.best.fillRate * 100 - 45) < 0.6, '装载率应约 45%，实际 ' + (withDun.best.fillRate * 100).toFixed(1));
+  const noDun = P.runPlans({ container: C.get('40GP'), rows: [row('l', { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' }, 1000, '', 'lshape')] });
+  assert.strictEqual(noDun.best.boxes, 100, '不开垫块时仍是 1 层 100 箱，实际 ' + noDun.best.boxes);
+});
+
+test('侧放的 L 形 / 斜顶：支撑面按真实接触面算，物理校验必须通过', () => {
+  const slope = row('s', { L: '600', W: '400', Hlow: '300', Hhigh: '500' }, 400, '', 'slope');
+  slope.allowSide = true;
+  slope.allowFlip = true;
+  const r = P.run(state(C.get('40HQ'), [slope]));
+  assert.deepStrictEqual(P.validatePhysics(r), []);
+  assertInBounds(r, C.get('40HQ'), '侧放斜顶');
+  assert.ok(P.posesFor(r.items[0]).some((p) => p.vertical !== 2), '斜顶的姿态集里没有侧放');
+
+  // 直接构造一只侧放的 L（不依赖算法是否选中它），检查接触面与支撑
+  const lRow = row('l', { L: '600', W: '400', Wlow: '200', Whigh: '200', Hlow: '300', Hhigh: '500' }, 1, '', 'lshape');
+  lRow.allowSide = true;
+  lRow.allowFlip = true;
+  const base = P.run(state(C.get('40HQ'), [lRow]));
+  const item = base.items[0];
+  const sidePose = P.posesFor(item).filter((p) => p.vertical !== 2)[0];
+  assert.ok(sidePose, 'L 形没有侧放姿态');
+  const place = {
+    skuId: item.id, x: 0, y: 0, z: 0,
+    l: sidePose.fx, w: sidePose.fy, h: sidePose.thickness,
+    layer: 0, kind: 'side', pose: sidePose.m
+  };
+  const pack = { items: [item], placements: [place], dunnage: [], container: C.get('40HQ') };
+  assert.deepStrictEqual(P.validatePhysics(pack), [], '侧放 L 单片应能放在柜底');
+  const f = P.facesRel(item, sidePose.m, place.l, place.w, place.h);
+  assert.ok(f.bottom.length > 0 && f.top.length > 0, '侧放 L 的接触面算空了');
+  const area = (rs) => rs.reduce((s, r) => s + r.l * r.w, 0);
+  assert.ok(area(f.bottom) > 0, '侧放 L 的底面算成了 0');
+});
+
 // ---------- 硬基准 ----------
 console.log('\n硬基准（写进代码注释的那个）');
 

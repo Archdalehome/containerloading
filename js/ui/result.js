@@ -66,10 +66,30 @@
   function renderWhy(pack, state) {
     var X = NS.explain;
     if (!X) return '';
+    var t = pack.totals;
+
+    // 全部装完：这就不是「装不进去」，而是货量本身只有这么多，必须说清楚，否则用户会以为算错
+    if (t.remainingCount === 0) {
+      var sp0 = X.space(pack);
+      var hr = X.headroom ? X.headroom(state, pack, pack.planSet) : null;
+      var html0 = '<div class="why-box is-done">';
+      html0 += '<p class="why-title">全部 <b>' + t.loadedCount.toLocaleString('zh-CN') +
+        '</b> 箱已装入本柜' +
+        (hr && hr.moreBoxes > 0 ? ' · 柜内还能再放约 <b>' + hr.moreBoxes.toLocaleString('zh-CN') + ' 箱</b>' : '') +
+        ' · 装载率 <b>' + pct(t.fillRate) + '</b>（货量上限，非算法限制）</p>';
+      html0 += '<p class="why-line">装载率低是因为这批货的净体积只有 ' + m3(t.netVolume) +
+        ' m³，柜子装满了也到不了 100%——不是算法卡住，也不是装不下。</p>';
+      html0 += '<p class="why-line">柜内还有 <b>' + m3(sp0.remaining) + ' m³</b> 空位' +
+        (hr ? '；按同一套规则，本柜上限 <b>' + hr.capacity.toLocaleString('zh-CN') + ' 箱</b>' +
+          (hr.moreBoxes > 0 ? '（还能再装 ' + hr.moreBoxes.toLocaleString('zh-CN') + ' 箱，约 ' +
+            m3(hr.moreVolume) + ' m³）' : '，已经装满') : '') + '。</p>';
+      html0 += '</div>';
+      return html0;
+    }
+
     var why = X.stopText(pack);
     var sp = X.space(pack);
     var unlocks = X.unlocks(state, pack, pack.planSet);
-    var remainingCargo = pack.totals.remainingCount;
 
     var html = '<div class="why-box">';
     html += '<p class="why-title">为什么停在这里：<b>' + esc(why.base) + '</b></p>';
@@ -79,7 +99,7 @@
       '不可承重 <b>' + m3(sp.nonBearing) + ' m³</b>（斜面 ' + m3(sp.slopeTop) +
       ' · 顶面零碎 ' + m3(sp.fragment) + ' · 高度不足 ' + m3(sp.heightShort) + '）</p>';
 
-    if (sp.bearing > 1e9 && remainingCargo > 0) {
+    if (sp.bearing > 1e9) {
       html += '<p class="why-line muted">可承重那部分没被用上，是因为当前<b>一层只排一个主箱型</b>' +
         '（同层换姿态填条带才刚加上），不是物理限制。</p>';
     }
@@ -92,11 +112,10 @@
     if (unlocks.length) {
       html += '<p class="why-unlock">想再装：' + unlocks.map(function (u) {
         return '<span class="why-chip' + (u.gated ? ' gated' : '') + '">' + esc(u.label) +
-          ' → <b>' + u.boxes.toLocaleString('zh-CN') + ' 箱</b>（+' + u.delta + '）<small>' + esc(u.note) + '</small>' +
-          '<button type="button" class="why-btn" data-unlock="' + esc(u.key) + '">一键允许并重算</button></span>';
+          ' → <b>' + u.boxes.toLocaleString('zh-CN') + ' 箱</b>（+' + u.delta + '）<small>' + esc(u.note) + '</small></span>';
       }).join('') + '</p>';
-      html += '<p class="why-hint">「一键允许」会把这个开关打给所有箱型再重算——翻过来放的货现场要照着装，' +
-        '有「此面向上」标识的别点。</p>';
+      html += '<p class="why-hint">默认不限方向；要限制的货（有「此面向上」标识、易碎必须立放的），' +
+        '在那一行取消「允许侧放 / 允许倒放」即可。</p>';
     }
     html += '</div>';
     return html;
@@ -149,7 +168,10 @@
         '</span></div>' +
       '<div class="metric"><span class="metric-label">已装箱数</span>' +
         '<span class="metric-value">' + t.loadedCount.toLocaleString('zh-CN') + ' <small>/ ' + t.requestedCount.toLocaleString('zh-CN') + ' 箱</small></span>' +
-        '<span class="metric-sub">' + (allLoaded ? '全部装完' : '剩余 ' + t.remainingCount.toLocaleString('zh-CN') + ' 箱未装') + '</span></div>' +
+        '<span class="metric-sub">' + (allLoaded
+          ? '全部 ' + t.loadedCount.toLocaleString('zh-CN') + ' 箱已装入 · 柜内空位 ' +
+            m3(Math.max(0, pack.containerVolume - t.netVolume - dunnageVol)) + ' m³'
+          : '剩余 ' + t.remainingCount.toLocaleString('zh-CN') + ' 箱未装') + '</span></div>' +
       '<div class="metric"><span class="metric-label">总重 / 载重上限</span>' +
         '<span class="metric-value">' + (t.weightKnown ? kg(t.weight) : '—') +
           (t.weightKnown ? ' <small>/ ' + kg(t.payload) + ' kg</small>' : '') + '</span>' +

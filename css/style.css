@@ -530,6 +530,10 @@ input[type=number]::-webkit-inner-spin-button { margin-left: 2px; }
   padding: 10px 14px;
   margin-bottom: 12px;
 }
+.why-box.is-done {
+  border-left-color: #2e9e63;
+  background: #f6fcf8;
+}
 .why-title { font-size: 13px; color: var(--ink); margin: 0 0 6px; line-height: 1.65; }
 .why-line { font-size: 12.5px; color: var(--ink2); margin: 3px 0; line-height: 1.7; }
 .why-unlock { margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }

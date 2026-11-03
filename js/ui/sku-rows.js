@@ -72,8 +72,8 @@
           '<span class="input-wrap"><input type="number" class="weight-input" step="0.01" min="0" inputmode="decimal" placeholder="可选" value="' + esc(row.weight) + '"></span>' +
         '</label>' +
         '<div class="pose-toggles">' +
-          '<label class="toggle"><input type="checkbox" class="opt-flip"' + (row.allowFlip ? ' checked' : '') + '> 可倒放</label>' +
-          '<label class="toggle"><input type="checkbox" class="opt-side"' + (row.allowSide ? ' checked' : '') + '> 可侧放</label>' +
+          '<label class="toggle" title="不勾就只按底面朝下摆（有「此面向上」标识的货请取消）"><input type="checkbox" class="opt-flip"' + (row.allowFlip ? ' checked' : '') + '> 允许倒放</label>' +
+          '<label class="toggle" title="不勾就只按底面朝下摆（易碎、必须立着放的货请取消）"><input type="checkbox" class="opt-side"' + (row.allowSide ? ' checked' : '') + '> 允许侧放</label>' +
         '</div>' +
         '<div class="row-meta"></div>' +
       '</div>' +

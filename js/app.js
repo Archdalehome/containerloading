@@ -32,9 +32,9 @@
       values: Object.assign({}, s.defaults),
       qty: '1',
       weight: '',
-      // 斜顶箱默认允许倒放——但只用于对扣（引擎里单独倒放是被禁止的）
-      allowFlip: s.key === 'slope',
-      allowSide: false
+      // 默认不限方向：现实里可以任意方向摆，只要求不悬空、不穿插（用户 2026-11 决定）
+      allowFlip: true,
+      allowSide: true
     };
   }
 
@@ -53,8 +53,8 @@
       values: values,
       qty: raw && raw.qty !== undefined && raw.qty !== null && raw.qty !== '' ? String(raw.qty) : '1',
       weight: raw && raw.weight !== undefined && raw.weight !== null ? String(raw.weight) : '',
-      allowFlip: raw && raw.allowFlip !== undefined ? !!raw.allowFlip : (s.key === 'slope'),
-      allowSide: !!(raw && raw.allowSide)
+      allowFlip: raw && raw.allowFlip !== undefined ? !!raw.allowFlip : true,
+      allowSide: raw && raw.allowSide !== undefined ? !!raw.allowSide : true
     };
   }
 
@@ -116,9 +116,7 @@
         });
         row.shape = next.key;
         row.values = merged;
-        // 切到斜顶默认允许倒放（仅用于对扣）；切到 L 形默认不勾
-        if (next.key === 'slope') row.allowFlip = true;
-        if (next.key === 'lshape') row.allowFlip = false;
+        // 默认不限方向；要限制的货由用户自己取消勾选
         ST.save(state);
         rowsUI.renderAll();
         CL.ui.result.markStale();
@@ -209,40 +207,6 @@
       if (chip && chip.dataset.plan) {
         selectPlan(chip.dataset.plan);
       }
-    });
-
-    /**
-     * 「为什么停」里的「一键允许并重算」：把某个姿态/填缝开关全部打开再算一遍。
-     * 一定要用户自己点——把货翻过来放是现场要照着装的，不能默认替他决定。
-     */
-    function applyUnlock(kind) {
-      if (kind === 'side') {
-        state.rows.forEach(function (r) { r.allowSide = true; });
-      } else if (kind === 'flip') {
-        // 矩形箱倒放没有收益，只给斜顶/L 形打开；对扣上件仍然必须是倒放
-        state.rows.forEach(function (r) { if (r.shape !== 'rect') r.allowFlip = true; });
-      } else if (kind === 'fill') {
-        state.options.allowFill = true;
-        var fillEl = document.getElementById('allow-fill');
-        if (fillEl) fillEl.checked = true;
-      } else if (kind === 'dunnage') {
-        state.options.allowDunnage = true;
-        var dEl = document.getElementById('allow-dunnage');
-        if (dEl) dEl.checked = true;
-      } else {
-        return;
-      }
-      ST.save(state);
-      rowsUI.renderAll();
-      document.getElementById('calc-btn').click();
-    }
-
-    document.addEventListener('click', function (e) {
-      var t = e.target;
-      if (!t || !t.closest) return;
-      var btn = t.closest('.why-btn');
-      if (!btn) return;
-      applyUnlock(btn.dataset.unlock);
     });
 
     var layerSelect = document.getElementById('layer-select');

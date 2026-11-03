@@ -362,6 +362,21 @@ function pageTestScript() {
       whyText.includes('斜面') && whyText.includes('顶面零碎') && whyText.includes('高度不足'), whyText.slice(0, 220));
   }
 
+  // 状态区分：装不下 → 停因行；全部装入 → 「全部…已装入」+ 还能再放 N 箱。两者互斥
+  const partialBody = $('#result-body').textContent;
+  step('装不下时不出现「全部装入」文案', !partialBody.includes('货量上限，非算法限制'), '当前是部分装载');
+  setVal($('.qty-input', cards()[0]), '100');
+  await calc();
+  await wait(250);
+  const doneBody = $('#result-body').textContent;
+  const doneBox = $('#result-body .why-box.is-done');
+  step('输入量小于容量时出现「全部…已装入」', !!doneBox && doneBody.includes('全部 100 箱已装入本柜'),
+    (doneBox ? doneBox.textContent : doneBody).replace(/\s+/g, ' ').slice(0, 120));
+  step('全部装入时给出还能再放多少箱', doneBody.includes('还能再放约'),
+    (doneBox ? doneBox.textContent : '').replace(/\\s+/g, ' ').slice(0, 160));
+  step('全部装入时不出现停因行', !doneBody.includes('为什么停在这里'), '两者互斥');
+  step('全部装入时写明装载率是货量上限', doneBody.includes('货量上限，非算法限制'), 'ok');
+
   // 同款换姿态填条带：550×450×300 侧放开，条带里塞得进去
   click($('.shape-tab[data-shape="rect"]', cards()[0]));
   await wait(80);
@@ -389,13 +404,18 @@ function pageTestScript() {
   const stripHealth = ($('#health-box') || {}).textContent || '';
   step('条带填缝后本单体检全 0', stripHealth.includes('全部通过'), stripHealth.replace(/\s+/g, ' ').slice(0, 120));
 
-  // 复位「可侧放」，后面的垫块/对扣用例按默认开关跑
-  if (sideOn) {
-    sideOn.checked = false;
+  // 复位成默认「不限方向」，后面的垫块 / 对扣用例按默认值跑
+  if (sideOn && !sideOn.checked) {
+    sideOn.checked = true;
     sideOn.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  window.CL.app.state.rows[0].allowSide = false;
-  window.CL.app.state.rows[0].allowFlip = false;
+  const flipOn = $('.opt-flip', cards()[0]);
+  if (flipOn && !flipOn.checked) {
+    flipOn.checked = true;
+    flipOn.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  window.CL.app.state.rows[0].allowSide = true;
+  window.CL.app.state.rows[0].allowFlip = true;
   setVal($('.qty-input', cards()[0]), '1680');
   await calc();
   await wait(200);
@@ -424,7 +444,11 @@ function pageTestScript() {
   setField(0, 'Hhigh', '500');
   setVal($('.qty-input', cards()[0]), '600');
   await calc();
-  step('斜顶默认按对扣计算（可倒放默认开）', window.CL.app.lastPack.layers[0].kind === 'pair', window.CL.app.lastPack.layers[0].kind);
+  step('斜顶默认不限方向：600 箱全部装下', window.CL.app.lastPack.totals.loadedCount === 600,
+    '已装 ' + window.CL.app.lastPack.totals.loadedCount + ' 箱，首层 ' + window.CL.app.lastPack.layers[0].kind);
+  step('斜顶的对扣方案仍在候选里',
+    (window.CL.app.planSet.plans || []).some((pl) => pl.pack.layers.length && pl.pack.layers[0].kind === 'pair'),
+    '对扣方案数 ' + (window.CL.app.planSet.plans || []).filter((pl) => pl.pack.layers.length && pl.pack.layers[0].kind === 'pair').length);
 
   const flipBox = $('.opt-flip', cards()[0]);
   step('可倒放开关存在', !!flipBox);
@@ -570,62 +594,41 @@ function pageTestScript() {
   setField(0, 'L', '400');
   setField(0, 'W', '300');
   setField(0, 'H', '300');
-  const sideReset = $('.opt-side', cards()[0]);
-  if (sideReset && sideReset.checked) {
-    sideReset.checked = false;
-    sideReset.dispatchEvent(new Event('change', { bubbles: true }));
+  // 默认不限方向：先按默认跑，应当是 1610 箱（侧放参与择优）
+  const side40 = $('.opt-side', cards()[0]);
+  if (side40 && !side40.checked) {
+    side40.checked = true;
+    side40.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  const flipReset = $('.opt-flip', cards()[0]);
-  if (flipReset && flipReset.checked) {
-    flipReset.checked = false;
-    flipReset.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-  // 双保险：勾选框在重渲染后可能已经换了一个元素，直接改状态
-  window.CL.app.state.rows[0].allowSide = false;
-  window.CL.app.state.rows[0].allowFlip = false;
+  window.CL.app.state.rows[0].allowSide = true;
   click($('.preset[data-key="40GP"]'));
   await wait(80);
   setVal($('.qty-input', cards()[0]), '1680');
   await calc();
   await wait(400);
   const rc40gp = renderCheck(window.CL.app.lastPack, '40gp');
-  step('40GP 满柜：侧放关 → 竖放 7 层 1470 箱', window.CL.app.lastPack.totals.loadedCount === 1470,
+  step('40GP 默认不限方向 → 1610 箱', window.CL.app.lastPack.totals.loadedCount === 1610,
     '已装 ' + window.CL.app.lastPack.totals.loadedCount + ' 箱 / ' + window.CL.app.lastPack.layers.length +
     ' 层 / 姿态 ' + window.CL.app.lastPack.layers.map((l) => l.kind).join(','));
-  // 为什么停里「勾选可侧放可到 1610」必须配一键按钮，点了要真的变
-  const sideBtn = $('#result-body .why-btn[data-unlock="side"]');
-  step('为什么停给出「一键允许」按钮', !!sideBtn, sideBtn ? 'ok' : '没有 .why-btn');
-  if (sideBtn) {
-    click(sideBtn);
-    await wait(500);
-    const after = window.CL.app.lastPack.totals.loadedCount;
-    step('一键允许可侧放后 1470 → 1610 箱', after === 1610, '已装 ' + after + ' 箱');
-    step('一键允许把勾选框也打上了', !!document.querySelector('.opt-side') && document.querySelector('.opt-side').checked,
-      '侧放勾选 ' + (document.querySelector('.opt-side') || {}).checked);
-    click($('.opt-side', cards()[0]));
-    window.CL.app.state.rows[0].allowSide = false;
-    await calc();
-    await wait(200);
-  }
-  // 勾上「可侧放」后方案才能用侧放姿态：1470 → 1610
-  const side40 = $('.opt-side', cards()[0]);
-  if (side40) {
-    side40.checked = true;
-    side40.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-  window.CL.app.state.rows[0].allowSide = true;
-  await calc();
-  await wait(300);
-  step('勾选可侧放后 40GP → 1610 箱（开关真的生效）',
-    window.CL.app.lastPack.totals.loadedCount === 1610,
-    '已装 ' + window.CL.app.lastPack.totals.loadedCount + ' 箱');
+  // 取消「允许侧放」应该退回竖放 7 层 1470 箱，证明勾选是硬限制
   if (side40) {
     side40.checked = false;
     side40.dispatchEvent(new Event('change', { bubbles: true }));
   }
   window.CL.app.state.rows[0].allowSide = false;
   await calc();
+  await wait(300);
+  step('取消允许侧放后 40GP → 1470 箱（勾选是硬限制）',
+    window.CL.app.lastPack.totals.loadedCount === 1470,
+    '已装 ' + window.CL.app.lastPack.totals.loadedCount + ' 箱');
+  if (side40) {
+    side40.checked = true;
+    side40.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  window.CL.app.state.rows[0].allowSide = true;
+  await calc();
   await wait(200);
+  step('结果页不再有「一键允许」按钮（默认已全允许）', !$('#result-body .why-btn'), 'ok');
   step('40GP 渲染箱体全在柜内腔（不低于柜底、不超柜顶）', rc40gp.outOfBounds === 0, rc40gp.firstOob || '越界 0 箱');
   step('40GP 渲染箱体两两不相交', rc40gp.overlaps === 0, '重叠 ' + rc40gp.overlaps);
   step('40GP 描边与箱体一致', rc40gp.edgeErr < 1, '偏差 ' + rc40gp.edgeErr.toFixed(2) + ' mm');
@@ -943,6 +946,72 @@ try {
     fs.writeFileSync(outPair, Buffer.from(shotPair.data, 'base64'));
     console.log('  对扣特写：' + outPair + '（层姿态 ' + (pairShot.kinds || []).join(',') + '）');
   }
+
+  // 两种状态的截图：全部装入（302 箱，40GP L 形 + 垫块）与装不下（1000 箱）
+  // 注意：必须「算一个 → 截一张 → 再改数量」，否则两张都会截到最后一次计算的状态
+  const setupState = `(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const $ = (s) => document.querySelector(s);
+    const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+    const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const setVal = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    while ($$('.sku-card').length > 1) { click($$('.sku-card')[$$('.sku-card').length - 1].querySelector('[data-act="delete"]')); await wait(30); }
+    const preset = $('.preset[data-key="40GP"]');
+    if (preset) click(preset);
+    await wait(80);
+    let c0 = $$('.sku-card')[0];
+    const id0 = c0.dataset.id;
+    click(c0.querySelector('.shape-tab[data-shape="lshape"]'));
+    await wait(80);
+    c0 = document.querySelector('.sku-card[data-id="' + id0 + '"]');
+    const set = (k, v) => setVal(c0.querySelector('.v-input[data-key="' + k + '"]'), v);
+    set('L', '600'); set('W', '400'); set('Wlow', '160'); set('Whigh', '240');
+    set('Hlow', '300'); set('Hhigh', '500');
+    const d = $('#allow-dunnage');
+    if (d && !d.checked) { d.checked = true; d.dispatchEvent(new Event('change', { bubbles: true })); }
+    return true;
+  })()`;
+
+  const shotBox = async () => {
+    const r = await cdp.evaluate(`(() => {
+      const el = document.querySelector('#result-body .why-box');
+      const card = document.getElementById('result-card');
+      const base = el ? el.getBoundingClientRect() : card.getBoundingClientRect();
+      const cr = card.getBoundingClientRect();
+      return {
+        x: Math.round(cr.left + window.scrollX),
+        y: Math.max(0, Math.round(base.top + window.scrollY) - 200),
+        width: Math.round(cr.width),
+        height: Math.min(1100, Math.round(base.height) + 220)
+      };
+    })()`);
+    const shot = await cdp.send('Page.captureScreenshot', {
+      format: 'png', captureBeyondViewport: true,
+      clip: { x: r.x, y: r.y, width: r.width, height: r.height, scale: 1 }
+    });
+    return Buffer.from(shot.data, 'base64');
+  };
+
+  const calcState = async (qty) => {
+    await cdp.evaluate(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms));
+      const el = document.querySelector('.sku-card .qty-input');
+      el.value = '${qty}';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      document.getElementById('calc-btn').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(900);
+      return true;
+    })()`);
+  };
+
+  await cdp.evaluate(setupState);
+  await calcState(302);
+  const shotDone = await shotBox();
+  fs.writeFileSync(OUT_PNG.replace('.png', '-done.png'), shotDone);
+  await calcState(1000);
+  const shotPartial = await shotBox();
+  fs.writeFileSync(OUT_PNG.replace('.png', '-partial.png'), shotPartial);
+  console.log('  两种状态截图：' + OUT_PNG.replace('.png', '-done.png') + ' / ' + OUT_PNG.replace('.png', '-partial.png'));
 
   // 汇总
   const stepFailed = result.steps.filter((s) => !s.ok).length;

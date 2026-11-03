@@ -42,15 +42,11 @@
     return Number.isFinite(min) ? min : 0;
   }
 
-  /** 这一列的顶面能不能承重（口径与 pack.surfacesOf 一致，保守） */
+  /** 这一箱有没有可以承重的水平顶面（按真实几何，侧放/倒扣也算） */
   function bearsOnTop(item, p) {
-    if (!item) return false;
-    if (item.shape === 'slope') return p.kind === 'pair-upper';
-    if (item.shape === 'lshape') {
-      if (p.kind === 'pair-upper-l') return true;
-      return !!p.pose && p.pose[8] === 1; // 侧放/倒扣的 L 没有水平顶面
-    }
-    return true;
+    if (!item || !NS.pack.facesRel) return true;
+    var f = NS.pack.facesRel(item, p.pose, p.l, p.w, p.h);
+    return !!(f && f.top && f.top.length);
   }
 
   function space(pack) {
@@ -63,63 +59,82 @@
     var dA = (L / nx) * (W / ny);
     var n = nx * ny;
     var top = new Float64Array(n);
-    var bear = new Uint8Array(n);
-    bear.fill(1); // 柜底默认承重
+    var bear = new Uint8Array(n); // 先全部按「不承重」算，最后由真实顶面标回来
 
     var itemsById = {};
     (pack.items || []).forEach(function (it) { itemsById[it.id] = it; });
 
-    function stampRect(p, topZ, isBear) {
-      var i0 = Math.max(0, Math.floor(p.x / (L / nx)));
-      var i1 = Math.min(nx - 1, Math.ceil((p.x + p.l) / (L / nx)) - 1);
-      var j0 = Math.max(0, Math.floor(p.y / (W / ny)));
-      var j1 = Math.min(ny - 1, Math.ceil((p.y + p.w) / (W / ny)) - 1);
-      for (var i = i0; i <= i1; i++) {
-        for (var j = j0; j <= j1; j++) {
+    function cellRange(x, y, l, w) {
+      return {
+        i0: Math.max(0, Math.floor(x / (L / nx))),
+        i1: Math.min(nx - 1, Math.ceil((x + l) / (L / nx)) - 1),
+        j0: Math.max(0, Math.floor(y / (W / ny))),
+        j1: Math.min(ny - 1, Math.ceil((y + w) / (W / ny)) - 1)
+      };
+    }
+
+    function stampRect(p, topZ) {
+      var r = cellRange(p.x, p.y, p.l, p.w);
+      for (var i = r.i0; i <= r.i1; i++) {
+        for (var j = r.j0; j <= r.j1; j++) {
           var idx = j * nx + i;
-          if (topZ > top[idx]) {
-            top[idx] = topZ;
-            bear[idx] = isBear ? 1 : 0;
-          } else if (Math.abs(topZ - top[idx]) < 0.5 && !isBear) {
-            // 同高的两个面，只要有一个不承重就按不承重算（保守）
-            bear[idx] = 0;
-          }
+          if (topZ > top[idx]) top[idx] = topZ;
         }
       }
     }
 
     (pack.placements || []).forEach(function (p) {
       var it = itemsById[p.skuId];
-      var isBear = bearsOnTop(it, p);
       var vertical = !p.pose || Math.abs(p.pose[8]) > 0.5; // 姿态里箱高朝上
       if (!it || it.shape === 'rect' || !vertical) {
-        // 矩形箱各面平整；侧放的箱子顶面也是完整平面（能否承重按 bearsOnTop 的保守口径）
-        stampRect(p, p.z + p.h, isBear);
+        stampRect(p, p.z + p.h);
         return;
       }
       // L 形 / 斜顶：顶面高度随位置变化，逐格算真实顶高，不能拿外接体冒充
-      var i0 = Math.max(0, Math.floor(p.x / (L / nx)));
-      var i1 = Math.min(nx - 1, Math.ceil((p.x + p.l) / (L / nx)) - 1);
-      var j0 = Math.max(0, Math.floor(p.y / (W / ny)));
-      var j1 = Math.min(ny - 1, Math.ceil((p.y + p.w) / (W / ny)) - 1);
-      for (var i = i0; i <= i1; i++) {
-        for (var j = j0; j <= j1; j++) {
+      var r = cellRange(p.x, p.y, p.l, p.w);
+      for (var i = r.i0; i <= r.i1; i++) {
+        for (var j = r.j0; j <= r.j1; j++) {
           var X = (i + 0.5) * (L / nx);
           var Y = (j + 0.5) * (W / ny);
           var span = SOLID.spanAt(p, it, X, Y);
           if (!span) continue;
           var idx = j * nx + i;
-          if (span[1] > top[idx]) {
-            top[idx] = span[1];
-            bear[idx] = isBear ? 1 : 0;
-          }
+          if (span[1] > top[idx]) top[idx] = span[1];
         }
       }
     });
 
-    (pack.dunnage || []).forEach(function (d) {
-      stampRect(d, d.z + d.h, true);
+    // 承重面：把每一箱的真实顶面标回格子（只有顶面高度对得上的格子才算能承重）
+    (pack.placements || []).forEach(function (p) {
+      var it = itemsById[p.skuId];
+      if (!it || !NS.pack.facesRel) return;
+      var f = NS.pack.facesRel(it, p.pose, p.l, p.w, p.h);
+      (f.top || []).forEach(function (face) {
+        var h = p.z + face.z;
+        var r = cellRange(p.x + face.x, p.y + face.y, face.l, face.w);
+        for (var i = r.i0; i <= r.i1; i++) {
+          for (var j = r.j0; j <= r.j1; j++) {
+            var idx = j * nx + i;
+            if (Math.abs(top[idx] - h) <= 1) bear[idx] = 1;
+          }
+        }
+      });
     });
+
+    (pack.dunnage || []).forEach(function (d) {
+      var h = d.z + d.h;
+      stampRect(d, h);
+      var r = cellRange(d.x, d.y, d.l, d.w);
+      for (var i = r.i0; i <= r.i1; i++) {
+        for (var j = r.j0; j <= r.j1; j++) {
+          var idx = j * nx + i;
+          if (Math.abs(top[idx] - h) <= 1) bear[idx] = 1;
+        }
+      }
+    });
+
+    // 柜底（没被任何箱子占的格子）本身可以承重
+    for (var q = 0; q < n; q++) if (top[q] <= 0.5) bear[q] = 1;
 
     var minT = minThickness(pack.items);
     var used = 0;
@@ -256,23 +271,33 @@
       return p.totals.loadedCount;
     }
 
-    // 可侧放：只对有开关没打开的箱型有意义
+    // 允许侧放：只有用户给某个 SKU 关掉了才可能有提升
     var canSide = (state.rows || []).some(function (r) { return !r.allowSide; });
     if (canSide) {
+      var sideNames = (state.rows || []).filter(function (r) { return !r.allowSide; })
+        .map(function (r) { return r.name || r.shape; });
       var nSide = rerun(function (rows) { return rows.map(function (r) { return Object.assign({}, r, { allowSide: true }); }); });
       if (nSide > baseBoxes) {
-        out.push({ key: 'side', label: '勾选「可侧放」', boxes: nSide, delta: nSide - baseBoxes, note: '箱子的长或宽朝上放' });
+        out.push({
+          key: 'side', label: '给 ' + sideNames.join('、') + ' 打开「允许侧放」',
+          boxes: nSide, delta: nSide - baseBoxes, note: '箱子的长或宽朝上放'
+        });
       }
     }
 
-    // 可倒放：斜顶/L 形才有意义（矩形倒放没有收益）
+    // 允许倒放：斜顶/L 形才有意义（矩形倒放没有收益）
     var canFlip = (state.rows || []).some(function (r) { return !r.allowFlip && r.shape !== 'rect'; });
     if (canFlip) {
+      var flipNames = (state.rows || []).filter(function (r) { return !r.allowFlip && r.shape !== 'rect'; })
+        .map(function (r) { return r.name || r.shape; });
       var nFlip = rerun(function (rows) {
         return rows.map(function (r) { return Object.assign({}, r, { allowFlip: r.shape === 'rect' ? r.allowFlip : true }); });
       });
       if (nFlip > baseBoxes) {
-        out.push({ key: 'flip', label: '勾选「可倒放」', boxes: nFlip, delta: nFlip - baseBoxes, note: '一正一倒对扣，顶面变平后才能继续叠' });
+        out.push({
+          key: 'flip', label: '给 ' + flipNames.join('、') + ' 打开「允许倒放」',
+          boxes: nFlip, delta: nFlip - baseBoxes, note: '一正一倒对扣，顶面变平后才能继续叠'
+        });
       }
     }
 
@@ -280,7 +305,7 @@
     if (!(state.options && state.options.allowFill)) {
       var nFill = rerun(null, function (o) { return Object.assign({}, o, { allowFill: true }); });
       if (nFill > baseBoxes) {
-        out.push({ key: 'fill', label: '勾选「跨 SKU 填缝」', boxes: nFill, delta: nFill - baseBoxes, note: '用别的箱型塞本层余缝' });
+        out.push({ key: 'fill', label: '打开「跨 SKU 填缝」', boxes: nFill, delta: nFill - baseBoxes, note: '用别的箱型塞本层余缝' });
       }
     }
 
@@ -299,10 +324,57 @@
     return out;
   }
 
+  /**
+   * 「本柜还能再装多少箱」：输入数量小于柜容量时，用户真正想知道的是这个数。
+   * 按当前方案同一套策略/开关，把每行数量放大再跑一遍，多出来的部分就是余量。
+   * 只在全部装完（剩余 0）时调用；装不完时谈「还能装多少」没有意义。
+   */
+  function headroom(state, pack, planSet) {
+    if (!state || !pack || pack.totals.remainingCount > 0) return null;
+    if (!NS.pack) return null;
+    var cfg = planSet && planSet.best ? planSet.best.config : null;
+    var rows = (state.rows || []).map(function (r) {
+      var q = S.toNum(r.qty);
+      if (!Number.isFinite(q) || q <= 0) q = 1;
+      return Object.assign({}, r, {
+        qty: String(Math.round(q) + 2000),
+        allowFlip: cfg ? (cfg.policy.allowFlip && !!r.allowFlip) : !!r.allowFlip,
+        allowSide: cfg ? (cfg.policy.allowSide && !!r.allowSide) : !!r.allowSide
+      });
+    });
+    var p = NS.pack.run({
+      container: state.container || {},
+      rows: rows,
+      options: {
+        allowFill: cfg ? cfg.fill : !!(state.options && state.options.allowFill),
+        allowDunnage: cfg ? cfg.dunnage : !!(state.options && state.options.allowDunnage),
+        sortBy: cfg ? cfg.order : undefined
+      }
+    });
+    var capacity = p.totals.loadedCount;
+    var moreBoxes = capacity - pack.totals.loadedCount;
+    return {
+      capacity: capacity,
+      moreBoxes: Math.max(0, moreBoxes),
+      moreVolume: Math.max(0, capacity - pack.totals.loadedCount) * averageNet(pack)
+    };
+  }
+
+  function averageNet(pack) {
+    var loaded = 0;
+    var vol = 0;
+    (pack.items || []).forEach(function (it) {
+      loaded += it.loaded;
+      vol += it.loaded * it.netVolumeEach;
+    });
+    return loaded > 0 ? vol / loaded : 0;
+  }
+
   NS.explain = {
     space: space,
     stopText: stopText,
     unlocks: unlocks,
+    headroom: headroom,
     STEP: STEP
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = NS.explain;
