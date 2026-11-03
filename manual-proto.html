@@ -36,11 +36,12 @@
   #shapes button.on { border-color: #38bdf8; color: #38bdf8; }
   /* 角点手柄：按屏幕坐标叠在 canvas 上，箱子离得再远也不会小到点不中 */
   #handles { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
-  #handles .ch { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px;
-                 border-radius: 50%; background: #0f172a; border: 2px solid #38bdf8;
-                 box-sizing: border-box; pointer-events: auto; cursor: crosshair; transition: transform .08s; }
-  #handles .ch:hover { background: #38bdf8; transform: scale(1.4); }
-  #handles .ch.anchor { border-color: #f59e0b; background: #f59e0b; }
+  #handles .ch { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px;
+                 border-radius: 50%; background: rgba(15,23,42,.55); border: 1.5px solid #38bdf8;
+                 box-sizing: border-box; pointer-events: auto; cursor: crosshair;
+                 opacity: .8; transition: transform .08s, opacity .08s; }
+  #handles .ch:hover { background: #38bdf8; transform: scale(1.7); opacity: 1; }
+  #handles .ch.anchor { border-color: #f59e0b; background: #f59e0b; opacity: 1; }
   #handles .ch.target { border-color: #22c55e; }
   #handles .ch.target:hover { background: #22c55e; }
 </style>
