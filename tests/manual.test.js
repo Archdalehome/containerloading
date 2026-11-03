@@ -139,5 +139,33 @@ test('L 形转 90°：返回姿态矩阵，采样几何随姿态变化', () => {
   assert.ok(solid > 0 && empty > 0, '应有实体也有空缺，实际 solid=' + solid + ' empty=' + empty);
 });
 
+console.log('\n混形状叠箱：L 形箱的低段顶 / 高段顶 / 跨台阶');
+
+const lItem2 = {
+  id: 'l', shape: 'lshape', bbox: { l: 900, w: 700, h: 600 },
+  shapeValues: { l: 900, w: 700, h: 600, wlow: 300, whigh: 400, hlow: 300, hhigh: 600 }
+};
+const smallItem = { id: 's', shape: 'rect', bbox: { l: 300, w: 200, h: 300 }, shapeValues: { l: 300, w: 200, h: 300 } };
+const midItem = { id: 'm', shape: 'rect', bbox: { l: 400, w: 400, h: 300 }, shapeValues: { l: 400, w: 400, h: 300 } };
+const by2 = { l: lItem2, s: smallItem, m: midItem };
+const bigL = { skuId: 'l', x: 0, y: 0, z: 0, l: 900, w: 700, h: 600, pose: [1, 0, 0, 0, 1, 0, 0, 0, 1] };
+
+test('L 低段顶可以叠小箱：落在 z=300（台阶面）', () => {
+  const r = M.tryPlace({ skuId: 's', x: 0, y: 0, z: 800, l: 300, w: 200, h: 300 }, [bigL], c, by2);
+  assert.ok(r.ok, '低段顶应可叠，实际 ' + r.reason);
+  assert.strictEqual(r.box.z, 300, '应落在台阶面 300，实际 ' + r.box.z);
+});
+
+test('L 高段顶可以叠小箱：落在 z=600', () => {
+  const r = M.tryPlace({ skuId: 's', x: 0, y: 300, z: 900, l: 300, w: 200, h: 300 }, [bigL], c, by2);
+  assert.ok(r.ok, '高段顶应可叠，实际 ' + r.reason);
+  assert.strictEqual(r.box.z, 600, '应落在高段顶 600，实际 ' + r.box.z);
+});
+
+test('跨高低两段的底面必须拒绝（一半悬在台阶上）', () => {
+  const r = M.tryPlace({ skuId: 'm', x: 0, y: 200, z: 900, l: 400, w: 400, h: 300 }, [bigL], c, by2);
+  assert.strictEqual(r.ok, false, '跨台阶应拒绝，实际 ok=' + r.ok + ' z=' + (r.box && r.box.z));
+});
+
 console.log('\n' + pass + ' 通过，' + fail + ' 失败\n');
 process.exit(fail === 0 ? 0 : 1);
