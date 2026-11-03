@@ -204,6 +204,9 @@ function matFor(skuId) {
   return skuMats.get(skuId);
 }
 const ghostMat = new THREE.MeshLambertMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.55 });
+// 拖动预览的颜色：蓝=随便落、青=已吸到支撑面并贴边、绿=已咬住自动对扣位
+const ghostFaceMat = new THREE.MeshLambertMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.6 });
+const ghostPairMat = new THREE.MeshLambertMaterial({ color: 0x22c55e, transparent: true, opacity: 0.65 });
 const SELECT_MAT = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
 const BAD_MAT = new THREE.MeshLambertMaterial({ color: 0xdc2626 });
 scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.1));
@@ -275,6 +278,7 @@ function containerXY(mesh, b) {
   return { x: mesh.position.x + L / 2 - b.l / 2, y: mesh.position.z + W / 2 - b.w / 2 };
 }
 const SNAP_TOL = 160;   // 吸附容差：越大越“粘”。现场堆箱是靠近就对齐，160mm 才有明显的磁吸感
+const PAIR_TOL = 400;   // 自动对扣的吸引距离：同款 L 形/斜顶在这个范围内就咬住
 
 /** 找出脚下能托住 (l×w) 的最高支撑高度：把同一高度的所有支撑面并起来看（两只箱拼着也能托住） */
 function supportRectUnder(placed, h, x, y, l, w) {
@@ -341,46 +345,59 @@ function placeGhost(ev) {
   let sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
   let sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
 
-  // 关键一步：把箱子“吸进”下方支撑面的矩形里。
-  // 否则靠近箱顶边缘时会在“能叠/压一半”之间来回跳，最后落到半压位置被判重叠。
-  const sup = supportRectUnder(others, b.h, sx, sy, b.l, b.w);
-  if (sup && sup.rect.l >= b.l - 1e-6 && sup.rect.w >= b.w - 1e-6) {
-    sx = Math.min(Math.max(sx, sup.rect.x), sup.rect.x + sup.rect.l - b.l);
-    sy = Math.min(Math.max(sy, sup.rect.y), sup.rect.y + sup.rect.w - b.w);
-  }
-
-  // 角对角磁吸：本箱 4 个底角 × 场内每个箱子的 4 个角（含柜角），最近一对在 200mm 内就平移重合。
-  // 这是现场堆箱的直觉——靠近就"咬"住一个角，尺寸不同也能对齐一角一边。
-  {
-    const myCorners = [[sx, sy], [sx + b.l, sy], [sx, sy + b.w], [sx + b.l, sy + b.w]];
-    const cands = [[0, 0], [c.innerL, 0], [0, c.innerW], [c.innerL, c.innerW]];
-    others.forEach((o) => {
-      cands.push([o.x, o.y], [o.x + o.l, o.y], [o.x, o.y + o.w], [o.x + o.l, o.y + o.w]);
-    });
-    let bestC = null;
-    for (const [mx, my] of myCorners) {
-      for (const [cx2, cy2] of cands) {
-        const d = Math.hypot(cx2 - mx, cy2 - my);
-        if (d <= 200 && (!bestC || d < bestC.d)) bestC = { d, dx: cx2 - mx, dy: cy2 - my };
-      }
-    }
-    if (bestC) {
-      sx = Math.min(Math.max(sx + bestC.dx, 0), L - b.l);
-      sy = Math.min(Math.max(sy + bestC.dy, 0), W - b.w);
-      dragging.cornerSnap = bestC.d;
+  // 拖动过程中就用松手时同一套算法算落点：所见即所得。
+  //   1) 同款 L 形/斜顶在 400mm 内 → 预览"翻过来扣上"的位置（带滞后，临界点上不来回抖）
+  //   2) 否则 → 预览"坐到支撑面 + 逐轴贴边"的位置
+  const probe = Object.assign({}, b, { x: sx, y: sy, z: b.z, uid: dragging.uid });
+  let preview = null;
+  const ap = CL.cornerLink.autoPairOnDrop(probe, others, c, itemsById, { tol: PAIR_TOL });
+  if (ap.ok) {
+    preview = { box: ap.box, kind: 'pair', pairedWith: ap.pairedWith, dist: ap.dist, res: ap.residual };
+    dragging.pairLock = { x: ap.box.x, y: ap.box.y, to: ap.pairedWith };
+  } else if (dragging.pairLock) {
+    // 滞后：已经咬住的扣位，得拖出 1.6 倍容差才松开，否则在边界上会闪
+    const d = Math.hypot(probe.x - dragging.pairLock.x, probe.y - dragging.pairLock.y);
+    const lockBox = others.find((o) => o.uid === dragging.pairLock.to);
+    const ph = lockBox && CL.cornerLink.pairPlacement(lockBox, itemsById[b.skuId]);
+    if (d <= PAIR_TOL * 1.6 && ph) {
+      const locked = Object.assign({}, b, ph);
+      preview = {
+        box: locked, kind: 'pair', pairedWith: lockBox.uid, dist: Math.round(d * 10) / 10,
+        res: {
+          dx: Math.round((locked.x - lockBox.x) * 10) / 10,
+          dy: Math.round((locked.y - lockBox.y) * 10) / 10,
+          dz: Math.round((locked.z - lockBox.z - itemsById[b.skuId].shapeValues.hlow) * 10) / 10
+        }
+      };
     } else {
-      dragging.cornerSnap = null;
+      dragging.pairLock = null;
     }
   }
-  dragging.snapped = Object.assign({}, sn.box, { x: sx, y: sy });
-  // 拖到哪儿就落到哪儿的最高支撑面上：这样“把箱子提起来放到另一个上面”是拖过去松手就成，
-  // 而不是只能在原地打转。settle 只认完整托住底面的水平面，所以悬空/半压缺口都不会成立。
-  const st = CL.manual.settle(
-    Object.assign({}, b, { x: sx, y: sy, z: c.innerH }), others, c, itemsById
+  if (!preview) {
+    const pf = CL.cornerLink.placeOnFace(
+      Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById, { tol: 150 });
+    if (pf.ok) preview = { box: pf.box, kind: 'face', info: pf };
+    else dragging.previewFail = pf.message;
+  }
+  if (!preview) {
+    // 什么也贴不上（被挡住/出柜）：保持原高度原位置，松手会报原因
+    const st = CL.manual.settle(Object.assign({}, b, { x: sx, y: sy, z: c.innerH }), others, c, itemsById);
+    dragging.preview = null;
+    dragging.previewKind = 'raw';
+    dragging.snapped = Object.assign({}, b, { x: sx, y: sy, z: st.ok ? st.z : b.z });
+    dragging.mesh.material = ghostMat;
+    dragging.mesh.position.set(sx + halfL - L / 2, dragging.snapped.z + b.h / 2, sy + halfW - W / 2);
+    return;
+  }
+  dragging.preview = preview;
+  dragging.previewKind = preview.kind;
+  dragging.snapped = preview.box;
+  dragging.mesh.material = preview.kind === 'pair' ? ghostPairMat : ghostFaceMat;
+  dragging.mesh.position.set(
+    preview.box.x + halfL - L / 2,
+    preview.box.z + b.h / 2,
+    preview.box.y + halfW - W / 2
   );
-  const targetZ = st.ok ? st.z : b.z;
-  dragging.targetZ = targetZ;
-  dragging.mesh.position.set(sx + halfL - L / 2, targetZ + b.h / 2, sy + halfW - W / 2);
 }
 
 renderer.domElement.addEventListener('pointermove', (ev) => {
@@ -390,73 +407,40 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
 renderer.domElement.addEventListener('pointerup', (ev) => {
   if (!dragging) return;
   const { uid, mesh, start } = dragging;
-  const snappedBox = dragging.snapped;
-  const intendedZ = dragging.targetZ;      // 拖动中算好的落点高度，清空 dragging 之前先留住
+  const pv = dragging.preview;         // 拖动中实时算好的落点：所见即所得
+  const failMsg = dragging.previewFail;
   const moved = dragging.moved === true;   // 只是点一下（没拖动）就别动它
   dragging = null;
   mesh.material = matFor(start.skuId);
-  // 落位用拖动中已经算好的吸附位置（没有就现场再算一次），再交给 tryPlace 做沉降与判定
-  const base = snappedBox || Object.assign({}, start, containerXY(mesh, start));
-  const input = { skuId: start.skuId, x: base.x, y: base.y, z: c.innerH, l: start.l, w: start.w, h: start.h, pose: start.pose };
-  const others = model.boxes.filter((b) => b.uid !== uid);
-  const dropZ = (intendedZ !== undefined) ? intendedZ : start.z;
-  // 1) 自动对扣优先：同款 L 形/斜顶箱拖到附近，自己翻过来扣上去（角对齐、零侵入都由几何算）
-  const ap = moved
-    ? CL.cornerLink.autoPairOnDrop(Object.assign({}, input, { z: dropZ, uid: uid }), others, c, itemsById, { tol: 400 })
-    : { ok: false };
-  if (ap.ok) {
+  if (!moved) return;                      // 单击只负责选中，不动箱子
+  if (!pv) {
+    syncMesh(start);
+    say('放不下：' + (failMsg || '这个位置没有可落的面'), true);
+    return;
+  }
+  if (pv.kind === 'pair') {
     model.boxes = model.boxes.map((b) => (b.uid === uid
-      ? Object.assign(ap.box, { uid, pinned: true, pairedWith: ap.pairedWith })
-      : (b.uid === ap.pairedWith ? Object.assign({}, b, { paired: true }) : b)));
+      ? Object.assign({}, pv.box, { uid, pinned: true, pairedWith: pv.pairedWith })
+      : (b.uid === pv.pairedWith ? Object.assign({}, b, { paired: true }) : b)));
     selected = uid;
     refreshAll();
-    say('已自动对扣：#' + uid + ' 翻过来扣在 #' + ap.pairedWith + ' 上（水平 ' + ap.dist +
-      'mm 内自动吸附）｜角对齐 ' + ap.residual.dx + ' / ' + ap.residual.dy + ' / ' + ap.residual.dz +
-      'mm｜落点 z=' + Math.round(ap.box.z) + '｜与其它箱侵入 0mm');
+    say('已自动对扣：#' + uid + ' 翻过来扣在 #' + pv.pairedWith + ' 上（水平 ' + pv.dist +
+      'mm 内咬住）｜角对齐 ' + pv.res.dx + ' / ' + pv.res.dy + ' / ' + pv.res.dz +
+      'mm｜落点 z=' + Math.round(pv.box.z) + '｜与其它箱侵入 0mm');
     return;
   }
-  // 2) 普通落位：坐到支撑面 + 角对齐 + 验零侵入。只点一下（没拖动）就不动箱子。
-  const pf = moved
-    ? CL.cornerLink.placeOnFace(Object.assign({}, input, { z: dropZ, uid: uid }), others, c, itemsById, { tol: 150 })
-    : { ok: false, reason: 'click' };
-  if (pf.ok) {
-    model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign(pf.box, { uid }) : b));
-    refreshAll();
-    say('已落位：' + (pf.floor ? '柜底' : '下层箱面 z=' + Math.round(pf.supportZ)) +
-      '｜面接触 ' + Math.round(pf.contact.ratio * 100) + '%（' + pf.contact.area + 'mm²）' +
-      '｜缝 ' + pf.gap + 'mm' +
-      (pf.aligned.moved ? '｜角对齐 Δx ' + pf.aligned.dx + ' Δy ' + pf.aligned.dy + 'mm' : '｜角已在面上') +
-      '｜与其它箱侵入 0mm');
-    return;
-  }
-  if (moved) {
-    syncMesh(start);                     // 贴不上去就退回原位，再说原因
-    say('放不下：' + pf.message, true);
-    return;
-  }
-  // 拖动过程中已经吸附好了，松手时 **不再** 二次吸附：再吸一次会把它挪开几毫米，
-  // 正好破坏“完整托住底面”，于是叠箱被误判成放不下并弹回。
-  let res = CL.manual.tryPlace(input, others, c, itemsById, { tol: 0 });
-  if (!res.ok && (res.reason === 'no-support' || res.reason === 'overlap')) {
-    res = CL.manual.tryPlace(input, others, c, itemsById, { tol: SNAP_TOL });
-  }
-  if (!res.ok) {
-    syncMesh(start);                     // 先回弹到原位，再报原因
-    if (res.reason === 'no-support') {
-      const sup = supportRectUnder(others, start.h, base.x, base.y, start.l, start.w);
-      const supTxt = sup ? Math.round(sup.rect.l) + '×' + Math.round(sup.rect.w) : '没有';
-      say('放不下：下方支撑面 ' + supTxt + 'mm，托不住 ' + Math.round(start.l) + '×' + Math.round(start.w) + 'mm 的底面（要完整托住才能叠）', true);
-    } else {
-      say('放不下：' + res.message, true);
-    }
-    return;
-  }
-  model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign(res.box, { uid }) : b));
-  refreshAll();   // 里面会做重力结算：被拖走后上面悬空的箱子要落下来
-  const snapped = res.snaps && res.snaps.length
-    ? '，已贴齐 ' + res.snaps.map((s) => s.axis.toUpperCase() + (s.delta > 0 ? '+' : '') + Math.round(s.delta) + 'mm').join(' / ')
-    : '';
-  say('已落位：x=' + Math.round(res.box.x) + ' y=' + Math.round(res.box.y) + ' z=' + Math.round(res.box.z) + snapped);
+  const info = pv.info || {};
+  model.boxes = model.boxes.map((b) => (b.uid === uid ? Object.assign({}, pv.box, { uid }) : b));
+  selected = uid;
+  refreshAll();
+  say('已落位：' + (info.floor ? '柜底' : '下层箱面 z=' + Math.round(info.supportZ)) +
+    '｜面接触 ' + Math.round((info.contact ? info.contact.ratio : 1) * 100) + '%' +
+    '（' + (info.contact ? info.contact.area : Math.round(pv.box.l * pv.box.w)) + 'mm²）' +
+    '｜缝 ' + (info.gap === undefined ? 0 : info.gap) + 'mm' +
+    (info.aligned && info.aligned.moved
+      ? '｜贴边 Δx ' + info.aligned.dx + ' Δy ' + info.aligned.dy + 'mm（' + (info.aligned.x || '—') + ' / ' + (info.aligned.y || '—') + '）'
+      : '｜已贴齐') +
+    '｜与其它箱侵入 0mm');
 });
 
 function tick() {
@@ -535,9 +519,9 @@ function paintSelection() {
 }
 
 // 版本标记：直接写在页面上，用来确认浏览器拿到的是不是新版本（缓存了会显示旧时间）
-const BUILD = '2026-11-03 22:55';
+const BUILD = '2026-11-03 23:10';
 const buildEl = document.getElementById('build');
-if (buildEl) buildEl.textContent = 'build ' + BUILD + ' · 同款 L 形/斜顶拖到 400mm 内自动对扣';
+if (buildEl) buildEl.textContent = 'build ' + BUILD + ' · 拖动中实时预览：青=贴面贴边 绿=自动对扣';
 
 /** 重力结算：自下而上让每只箱子重新落到它当下的支撑面上。
  *  拖走下面那只、删掉一只、转完姿态之后都要跑，否则上面的箱子会悬在空中——违反常识。 */
