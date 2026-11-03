@@ -567,43 +567,26 @@ function doPair() {
   // 上件姿态与偏移一律由几何算：findFlipPose 给姿态，pairFit 在高度上搜出"零重叠零缝隙"的那个 z
   const flip = CL.pack.findFlipPose(it, { m: b.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1] });
   if (!flip) { say('这只箱子没有可用的对扣姿态', true); return; }
-  let cand = null;
-  // 水平偏移：翻转过姿态的箱子，翻转件的外廓和原件可能不等宽，需要按 s 的符号补一个偏移
-  const sx = (flip.s && flip.s[0] < 0) ? (b.l - flip.fx) : 0;
-  const sy = (flip.s && flip.s[1] < 0) ? (b.w - flip.fy) : 0;
-  const offsets = [[0, 0], [sx, sy], [sx, 0], [0, sy]];
-  // 竖直落点：理论上就是 H低；实测吻合，所以以它为中心小范围校正
-  const zBase = sv.hlow;
-  const zTry = [0];
-  for (let k = 5; k <= 100; k += 5) { zTry.push(k); zTry.push(-k); }
-  outer:
-  for (const [dx, dy] of offsets) {
-    for (const dzOff of zTry) {
-      const dz = zBase + dzOff;
-      if (dz < 0 || b.z + dz + flip.thickness > c.innerH + 0.5) continue;
-      const trial = {
-        skuId: b.skuId, x: b.x + dx, y: b.y + dy, z: b.z + dz,
-        l: flip.fx, w: flip.fy, h: flip.thickness, pose: flip.m
-      };
-      if (!CL.manual.inBounds(trial, c)) continue;
-      const fit = CL.solid.pairFit(
-        { skuId: b.skuId, x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: b.pose },
-        trial, it, { step: 10, tol: 1 }
-      );
-      // 必须真接触：缝隙 ≤1mm（不许悬着），但允许只碰到一部分（不要求整面压满）
-      if (fit.overlap > 1 || fit.gap > 1) continue;
-      // 物理常识：箱心正下方必须真的压在下方箱体上（否则是"搭在一条边上、整体悬空"）
-      const lx = trial.x + trial.l / 2 - b.x;
-      const ly = trial.y + trial.w / 2 - b.y;
-      const span = CL.solid.spanAt({ x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h, pose: b.pose }, it, lx, ly);
-      if (!span) continue;
-      const lowerTop = b.z + span[1];
-      if (Math.abs(lowerTop - trial.z) > 1) continue;   // 箱心下方没有碰到 → 悬空，不接受
-      cand = trial;
-      break outer;
+  // 不再自己搜高度：翻转姿态交给模型，落点由 settle 决定——落在真实支撑面上，就绝不可能悬空。
+  const YAW = [-1, 0, 0, 0, -1, 0, 0, 0, 1];
+  const bp = b.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const mul3 = (a, c2) => {
+    const o = new Array(9);
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+      o[i * 3 + j] = a[i * 3] * c2[j] + a[i * 3 + 1] * c2[3 + j] + a[i * 3 + 2] * c2[6 + j];
     }
-  }
-  if (!cand) { say('对扣放不下：这段高度里找不到严丝合缝的位置', true); return; }
+    return o;
+  };
+  const pairPose = mul3(YAW, bp);
+  const r = CL.manualModel.add(model, {
+    skuId: b.skuId, x: b.x, y: b.y, z: c.innerH,
+    l: b.l, w: b.w, h: b.h, pose: pairPose
+  });
+  if (!r.ok) { say('对扣放不下：' + (r.message || r.reason), true); return; }
+  r.box.pinned = true;
+  selected = r.box.uid;
+  refreshAll();
+  say('已对扣：上件落在 z=' + Math.round(r.box.z) + '（由支撑面决定，不会悬空）');
   if (!CL.manual.inBounds(cand, c)) { say('对扣放不下：会超出柜内腔或门高', true); return; }
   const others = model.boxes.filter((x) => x.uid !== b.uid);
   for (const o of others) {
