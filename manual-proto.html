@@ -828,6 +828,7 @@ function doPair() {
       return;
     }
     if (ap.reason === 'asymmetric') { say(ap.message, true); return; }
+    say('对扣没成（' + ap.reason + '：' + ap.message + '），改为新建一只配对件', true);
   }
   const ph = CL.cornerLink.pairPlacement(b, it);
   if (!ph) { say('这只箱型没有可用的对扣姿态', true); return; }
