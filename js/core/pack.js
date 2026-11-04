@@ -1,4 +1,4 @@
-/*
+﻿/*
  * 分层装载算法 v2。
  *
  * 与 v1 的关系：
@@ -1922,7 +1922,66 @@
    *
    * 返回结构与 runGreedy 一致（placements / totals / container），供上层直接使用。
    */
+  /**
+   * 中途留半排空的度量：沿柜长切片，算每片横截面（柜宽×柜高）的填充率，
+   * 统计「先掉下去又升回来」的位置数。
+   *
+   * 用户规则：第一排（柜尾整个横截面）装满再装下一排，余量集中在柜门处。
+   * 所以这个值越大越反常——3D 里就是「里面还没装满就开始装第二排第三排」。
+   */
+  function fillOrderViolations(pack, container) {
+    var c = container || (pack && pack.container);
+    if (!pack || !c || !pack.placements || !pack.placements.length) return 0;
+    var stepX = 400, stepY = 200;
+    var len = 0;
+    pack.placements.forEach(function (p) { len = Math.max(len, p.x + p.l); });
+    var prof = [];
+    for (var x = 0; x < len - 1e-6; x += stepX) {
+      var hit = 0, total = 0;
+      for (var y = 0; y < c.innerW; y += stepY) {
+        for (var z = 0; z < c.innerH; z += stepY) {
+          total++;
+          var cx = x + stepX / 2, cy = y + stepY / 2, cz = z + stepY / 2;
+          for (var i = 0; i < pack.placements.length; i++) {
+            var p = pack.placements[i];
+            if (cx >= p.x && cx < p.x + p.l && cy >= p.y && cy < p.y + p.w && cz >= p.z && cz < p.z + p.h) { hit++; break; }
+          }
+        }
+      }
+      prof.push(total ? hit / total : 0);
+    }
+    var bad = 0;
+    for (var k = 1; k < prof.length - 1; k++) {
+      if (prof[k] < prof[k - 1] - 0.15) {
+        var later = 0;
+        for (var j = k + 1; j < prof.length; j++) if (prof[j] > later) later = prof[j];
+        if (later > prof[k] + 0.10) bad++;
+      }
+    }
+    return bad;
+  }
+
   function runSlices(state) {
+    // 一片多长？以前一律取「最矮那个箱型的 L」，结果长箱型根本塞不进那片，
+    // 那一片几乎全空（实测填充 7%），下一片又填满——3D 里就是「里面没满就装下一排」。
+    // 现在把几种片长策略各算一遍，按「装得多 → 半排空少 → 柜长短」取最好那份。
+    var policies = ['min', 'max', 'volume'];
+    var best = null;
+    for (var i = 0; i < policies.length; i++) {
+      var pk = runSlicesWith(state, policies[i]);
+      if (!pk) continue;
+      var viol = fillOrderViolations(pk, pk.container);
+      var cand = { pk: pk, viol: viol, boxes: pk.totals.loadedCount, len: pk.length || 0 };
+      if (!best || cand.boxes > best.boxes ||
+          (cand.boxes === best.boxes && cand.viol < best.viol) ||
+          (cand.boxes === best.boxes && cand.viol === best.viol && cand.len < best.len)) {
+        best = cand;
+      }
+    }
+    return best ? best.pk : null;
+  }
+
+  function runSlicesWith(state, policy) {
     var c0 = state.container || {};
     var rows = (state.rows || []).filter(function (r) {
       var q = S.toNum(r.qty);
@@ -1941,7 +2000,22 @@
         var l = S.toNum(v.L);
         return Number.isFinite(l) && l > 0 ? l : 600;
       });
-      var sliceL = Math.min(c0.innerL - xOffset, Math.max(100, Math.min.apply(null, lens)));
+      var pickLen;
+      if (policy === 'max') {
+        pickLen = Math.max.apply(null, lens);
+      } else if (policy === 'volume') {
+        // 取「剩余体积最大」那个箱型的 L：它最可能把这一片填满
+        var bi = 0, bv = -1;
+        for (var ai = 0; ai < alive.length; ai++) {
+          var sh = S.get(alive[ai].row.shape);
+          var vol = sh.volume(alive[ai].row.values || {}) * alive[ai].qty;
+          if (vol > bv) { bv = vol; bi = ai; }
+        }
+        pickLen = lens[bi];
+      } else {
+        pickLen = Math.min.apply(null, lens);
+      }
+      var sliceL = Math.min(c0.innerL - xOffset, Math.max(100, pickLen));
       var sub = Object.assign({}, c0, { innerL: sliceL });
       var subRows = alive.map(function (e) {
         return Object.assign({}, e.row, { qty: e.qty });
@@ -1995,6 +2069,7 @@
       items: items,
       placements: placements,
       layers: [],
+      length: placements.reduce(function (m, p) { return Math.max(m, p.x + p.l); }, 0),
       usedHeight: placements.reduce(function (m, p) { return Math.max(m, p.z + p.h); }, 0),
       containerVolume: containerVolume,
       totals: {
@@ -2109,17 +2184,19 @@
    * 把「一列」落成真实摆放，最多放 n 只（n ≤ 列型容量）。
    * 关键：对扣块没排满时不许在上面放单只——否则单只会凭空悬在缺口上方。
    */
-  function emitColumn(item, t, x, n) {
+  function emitColumn(item, t, x, n, y0, lanes) {
     var p = t.pose;
     var bb = item.bbox;
     var sv = item.shapeValues;
     var out = [];
     var left = n;
+    var laneCount = lanes || t.ny;
+    var yStart = y0 || 0;
     var rot = Math.abs(p.fx - bb.l) < 1e-6 ? 0 : 90;
     function push(y, z, pose, layer, kind, col, row) {
       out.push({
         skuId: item.id, index: item.index || 0, col: col, row: row,
-        x: x, y: y, z: z, l: p.fx, w: p.fy, h: p.thickness,
+        x: x, y: yStart + y, z: z, l: p.fx, w: p.fy, h: p.thickness,
         rot: rot, layer: layer, pose: pose, kind: kind
       });
       left--;
@@ -2129,7 +2206,7 @@
       if (!fp) return out;
       var lowers = 0;
       for (var li = 0; li < t.k && left > 0; li++) {
-        for (var yi = 0; yi < t.ny && left > 0; yi++) {
+        for (var yi = 0; yi < laneCount && left > 0; yi++) {
           var zBase = li * t.pairTh;
           var yBase = yi * p.fy;
           push(yBase, zBase, p.m, li, 'pair-lower', yi + 1, li + 1);
@@ -2141,26 +2218,76 @@
         }
       }
       // 单只只能压在"排满的"对扣块顶上
-      if (t.single && left > 0 && lowers === t.k * t.ny) {
+      if (t.single && left > 0 && lowers === t.k * laneCount) {
         var zTop = t.k * t.pairTh;
-        for (var ys = 0; ys < t.ny && left > 0; ys++) {
+        for (var ys = 0; ys < laneCount && left > 0; ys++) {
           push(ys * p.fy, zTop, p.m, t.k, kindOfPose(p), ys + 1, t.k + 1);
         }
       }
       return out;
     }
     for (var l2 = 0; l2 < t.layers && left > 0; l2++) {
-      for (var y2 = 0; y2 < t.ny && left > 0; y2++) {
+      for (var y2 = 0; y2 < laneCount && left > 0; y2++) {
         push(y2 * p.fy, l2 * p.thickness, p.m, l2, kindOfPose(p), y2 + 1, l2 + 1);
       }
     }
     if (t.single && left > 0) {
       var zs = t.layers * p.thickness;
-      for (var y3 = 0; y3 < t.ny && left > 0; y3++) {
+      for (var y3 = 0; y3 < laneCount && left > 0; y3++) {
         push(y3 * p.fy, zs, p.m, t.layers, kindOfPose(p), y3 + 1, t.layers + 1);
       }
     }
     return out;
+  }
+
+  /**
+   * 把「一列没占满的剩余宽度」用别的箱型填掉，再往前走。
+   *
+   * 用户规则：第一排（柜尾整个横截面）装满再装下一排。
+   * 之前一列只占一部分柜宽（例如 fy=1200 时 ny=1，一排只用掉 1200/2352），
+   * 程序就往前开下一列了——从 3D 里看就是"里面还没装满就开始装第二排第三排"。
+   * 这里把同一段柜长里剩下的宽度当一条独立车道，继续用（任何箱型的）列型往下填，
+   * 填到放不下为止；车道长度就是这一列的柜长，不越出这一排。
+   */
+  function fillLane(items, typesById, remaining, placements, x, len, y0, laneW, container) {
+    if (!(laneW > 1) || !(len > 1)) return;
+    var cx = x;
+    var guard = 0;
+    while (cx < x + len - 1e-6 && guard++ < 300) {
+      var best = null;
+      for (var a = 0; a < items.length; a++) {
+        var it = items[a];
+        var rem = remaining[it.id];
+        if (!(rem > 0)) continue;
+        var tys = typesById[it.id] || [];
+        for (var b = 0; b < tys.length; b++) {
+          var t = tys[b];
+          var ny = Math.floor((laneW + 1e-6) / t.pose.fy);
+          if (ny <= 0 || ny > t.ny) continue;
+          // 车道长度只剩下 (x+len-cx)，列长必须放得进这段
+          if (t.cost > (x + len) - cx + 1e-6) continue;
+          var perLane = t.c / t.ny; // 每道能塞几只（含对扣块）
+          var n = Math.min(rem, perLane * ny);
+          if (!(n > 0)) continue;
+          var score = n / t.cost;
+          // 车道里同样整列优先，别在中途留半截
+          var laneFull = rem >= perLane * ny ? 1 : 0;
+          if (!best || laneFull > best.full ||
+              (laneFull === best.full &&
+                (score > best.score + 1e-12 ||
+                  (Math.abs(score - best.score) <= 1e-12 && (n > best.n ||
+                    (n === best.n && t.cost < best.t.cost)))))) {
+            best = { it: it, t: t, n: n, ny: ny, score: score, full: laneFull };
+          }
+        }
+      }
+      if (!best) break;
+      var eb = emitColumn(best.it, best.t, cx, best.n, y0, best.ny);
+      if (!eb.length) break;
+      for (var e = 0; e < eb.length; e++) placements.push(eb[e]);
+      remaining[best.it.id] -= eb.length;
+      cx += best.t.cost;
+    }
   }
 
   /** 把摆放组成一份 pack（列最优与分箱列块共用） */
@@ -2292,12 +2419,18 @@
           if (x + t.cost > container.innerL + 1e-6) continue;
           var n = Math.min(rem, t.c);
           if (!(n > 0)) continue;
-          // 密度 = 这一列实际塞进去的只数 / 占用的柜长；同密度取装得多、再取列短
+          // 密度 = 这一列实际塞进去的只数 / 占用的柜长
           var score = n / t.cost;
-          if (!best || score > best.score + 1e-12 ||
-              (Math.abs(score - best.score) <= 1e-12 && (n > best.n ||
-                (n === best.n && t.cost < best.t.cost)))) {
-            best = { it: it, t: t, n: n, score: score };
+          // 整列优先：剩的货不够一整列时，把它推到柜门那头去装，不能在中途留半排空
+          // （用户规则：第一排横截面装满再装下一排，余量集中在柜门处）。
+          var full = rem >= t.c ? 1 : 0;
+          var cand = { it: it, t: t, n: n, score: score, full: full };
+          if (!best || cand.full > best.full ||
+              (cand.full === best.full &&
+                (score > best.score + 1e-12 ||
+                  (Math.abs(score - best.score) <= 1e-12 && (n > best.n ||
+                    (n === best.n && t.cost < best.t.cost)))))) {
+            best = cand;
           }
         }
       }
@@ -2306,6 +2439,10 @@
       if (!eb.length) break;
       for (var e = 0; e < eb.length; e++) placements.push(eb[e]);
       remaining[best.it.id] -= eb.length;
+      // 这一排的宽度还没占满：先把剩下的宽度填掉再往前走（否则 3D 里就是"里面没装满就开始下一排"）
+      var usedW = best.t.ny * best.t.pose.fy;
+      fillLane(items, typesById, remaining, placements, x, best.t.cost, usedW,
+        container.innerW - usedW, container);
       x += best.t.cost;
     }
     if (!placements.length) return null;
@@ -2330,6 +2467,7 @@
     runSlices: runSlices,
     optimalColumns: optimalColumns,
     runColumnMix: runColumnMix,
+    fillOrderViolations: fillOrderViolations,
     mirrorX: mirrorX,
     // 只给测试用的内部实现：条带填缝、缺口嵌合这些机制要单独验，不能拿「最优方案」去验
     runGreedy: runGreedy,
@@ -2368,3 +2506,4 @@
 
   if (typeof module !== 'undefined' && module.exports) module.exports = NS.pack;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
+

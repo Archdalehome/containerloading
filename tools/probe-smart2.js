@@ -43,9 +43,13 @@ const plans = P.runPlans({ container: c, rows, options: {} });
 addCand(P.run({ container: c, rows, options: {} }), 'run');
 
 cands.sort((a, b) => (b.boxes - a.boxes) || (a.gap - b.gap) || (a.len - b.len) || (a.env - b.env));
+const finalists = cands.slice(0, 10);
+finalists.forEach((x) => { x.viol = P.fillOrderViolations(x.pack, c); });
+finalists.sort((a, b) => (b.boxes - a.boxes) || (a.viol - b.viol) || (a.gap - b.gap) || (a.len - b.len) || (a.env - b.env));
+const ordered = finalists.concat(cands.slice(finalists.length));
 console.log(qty + ' 只 · 用时 ' + (Date.now() - t0) + 'ms · 候选 ' + cands.length + ' 个');
-cands.slice(0, 5).forEach((x, i) => {
+ordered.slice(0, 5).forEach((x, i) => {
   console.log('  ' + (i + 1) + '. ' + x.tag.padEnd(9) + ' 箱数 ' + String(x.boxes).padStart(3) +
     ' 柜长 ' + (x.len / 1000).toFixed(2).padStart(5) + 'm 利用率 ' + (x.pack.totals.fillRate * 100).toFixed(1) + '%' +
-    ' 差 ' + (x.gap * 100).toFixed(1) + 'pt 物理错误 ' + x.errs);
+    ' 差 ' + (x.gap * 100).toFixed(1) + 'pt 半排空 ' + (x.viol == null ? '—' : x.viol) + ' 物理错误 ' + x.errs);
 });

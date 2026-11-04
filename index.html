@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -908,7 +908,7 @@ function doSmartPack() {
       for (const p of ps) m = Math.max(m, p.x + p.l);
       return m;
     };
-    const cands = [];
+    let cands = [];
     // 平衡度：柜长占用率与空间利用率的差。两个数越接近，说明"用掉的柜长"和"装进去的货"
     // 是匹配的，没有把布局拉长去凑；差得越大就是摊得越开。用户口径：越接近越优。
     const gapOf = (pk) => {
@@ -939,6 +939,13 @@ function doSmartPack() {
     cands.forEach((x) => { if (x.boxes == null) x.boxes = nOf(x.pack); });
     // 排序：装得多 → 柜长/利用率越接近越好 → 柜长占用小 → 包络小
     cands.sort((a, b) => (b.boxes - a.boxes) || (a.gap - b.gap) || (a.len - b.len) || (a.env - b.env));
+    // 「第一排横截面装满再装下一排」是硬规矩（用户反复提）：把前半段里"先空下去又满回来"
+    // 的位置数算进排名。逐份都算太慢（1680 箱时每份要采几十万格），只对前几名复核再重排。
+    const finalists = cands.slice(0, 10);
+    finalists.forEach((x) => { x.viol = CL.pack.fillOrderViolations(x.pack, c); });
+    finalists.sort((a, b) => (b.boxes - a.boxes) || (a.viol - b.viol) || (a.gap - b.gap) ||
+      (a.len - b.len) || (a.env - b.env));
+    cands = finalists.concat(cands.slice(finalists.length));
     pack = cands.length ? cands[0].pack : CL.pack.run({ container: c, rows: rows, options: {} });
     chosen = cands.length ? cands[0] : null;
     candCount = cands.length;
@@ -984,7 +991,8 @@ function doSmartPack() {
     const usedLen = model.boxes.reduce((m, b) => Math.max(m, b.x + b.l), 0);
     verify = '｜方案 ' + ((chosen && chosen.tag) || '逐步贪心') + '（已比较 ' + candCount + ' 份）' +
       '｜物理校验 ' + (verr === 0 ? '0 错误' : verr + ' 处错误') +
-      '｜柜长 ' + (usedLen / 1000).toFixed(2) + 'm，理论下界 ' + (lb / 1000).toFixed(2) + 'm';
+      '｜柜长 ' + (usedLen / 1000).toFixed(2) + 'm，理论下界 ' + (lb / 1000).toFixed(2) + 'm' +
+      '｜半排空 ' + ((chosen && chosen.viol) || 0) + ' 处';
   } catch (e) { verify = ''; }
   say('智能计算：装入 ' + loaded + ' 箱' +
     (want > loaded ? '（还有 ' + (want - loaded) + ' 箱装不下）' : '（清单里的全部装下）') +
@@ -1432,3 +1440,4 @@ setTimeout(() => {
 </script>
 </body>
 </html>
+
