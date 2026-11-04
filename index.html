@@ -183,7 +183,7 @@ scene.add(world);
 let floor = null;
 /** 取景：把画面整体上抬 7%，柜体底边不被底部数据栏压住（并让 aspect 与视口一致） */
 function frameCamera() {
-  const w = innerWidth, h = innerHeight, H2 = Math.round(h * 1.30);
+  const w = innerWidth, h = innerHeight, H2 = Math.round(h * 1.30) - 40;   // -40px：整体往下挪约 1cm
   camera.aspect = w / H2;
   camera.setViewOffset(w, H2, 0, H2 - h, w, h);
   camera.updateProjectionMatrix();
@@ -220,7 +220,7 @@ function rebuildScene() {
   world.add(door);
   // 相机取景：拉近一点、视线略低于中心，柜体整体上移，不被底部面板和右下按钮挡住
   // 取景距离按 -10% 缩小：柜体在画面里小一圈（模型尺寸不变，只是视觉）
-  camera.position.set(L * 0.85, H * 2.48, W * 3.39);
+  camera.position.set(L * 0.81, H * 2.38, W * 3.23);
   camera.lookAt(0, H * 0.30, 0);
   frameCamera();
 }
@@ -280,7 +280,7 @@ function syncMesh(b) {
 
 // 相机：斜上方看整柜（rebuildScene 里会按柜型重新取景，这里只是初值）
 // 取景距离按 -10% 缩小：柜体在画面里小一圈（模型尺寸不变，只是视觉）
-  camera.position.set(L * 0.85, H * 2.48, W * 3.39);
+  camera.position.set(L * 0.81, H * 2.38, W * 3.23);
 camera.lookAt(0, H * 0.30, 0);
 frameCamera();
 
