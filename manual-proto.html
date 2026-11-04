@@ -337,21 +337,33 @@ function placeGhost(ev) {
   raycaster.setFromCamera(pointer, camera);
   const b = dragging.start;
   const halfL = b.l / 2, halfW = b.w / 2;
+  // 鼠标正下方命中了什么（一次射线，后面水平位置和高度都用它）
+  const hoverHits = raycaster.intersectObjects(
+    [floor].concat(Array.from(meshes.values()).filter((m) => m.userData.uid !== dragging.uid)), false);
   let bx, by;
   if (dragging.verticalOnly && dragging.lastBX !== undefined) {
     // 按住 Shift 只在竖直方向调整：水平位置锁住不动，免得一动鼠标箱子就横向漂
     bx = dragging.lastBX; by = dragging.lastBY;
   } else {
-    // 水平位置一律用"箱子自己那一层高度"的平面来取，而不是鼠标正下方命中的面。
-    // 命中面定位会在穿过柜壁线、地板、别的箱顶时不断换面，箱子就跟着跳——
-    // 这才是"被集装箱轮廓线干扰"的真正原因。落在哪一层由 placeOnFace 算，不靠射线。
-    const p = new THREE.Vector3();
-    if (!raycaster.ray.intersectPlane(dragPlane, p)) return;
-    let cxc = p.x + dragOffset.x + L / 2;
-    let czc = p.z + dragOffset.z + W / 2;
-    cxc = Math.min(Math.max(cxc, halfL), L - halfL);
-    czc = Math.min(Math.max(czc, halfW), W - halfW);
-    bx = cxc - halfL; by = czc - halfW;
+    // 水平位置优先跟着鼠标命中的那个面走：这样把箱子拖到高箱顶上时，
+    // 它落点就在高箱顶上。误差靠平滑（lerp）消化，不会一换面就跳。
+    // 鼠标没压到任何面（指到柜外）时，退回"箱子自己那一层高度"的平面。
+    let tx, ty;
+    if (hoverHits.length) {
+      const hp = hoverHits[0].point;
+      tx = hp.x + dragOffset.x + L / 2 - halfL;
+      ty = hp.z + dragOffset.z + W / 2 - halfW;
+    } else {
+      const p = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(dragPlane, p)) return;
+      tx = p.x + dragOffset.x + L / 2 - halfL;
+      ty = p.z + dragOffset.z + W / 2 - halfW;
+    }
+    if (!dragging.smooth) dragging.smooth = { x: tx, y: ty };
+    dragging.smooth.x += (tx - dragging.smooth.x) * 0.4;
+    dragging.smooth.y += (ty - dragging.smooth.y) * 0.4;
+    bx = Math.min(Math.max(dragging.smooth.x, 0), L - b.l);
+    by = Math.min(Math.max(dragging.smooth.y, 0), W - b.w);
     dragging.lastBX = bx; dragging.lastBY = by;
   }
   const cand = Object.assign({}, b, { x: bx, y: by });
@@ -374,12 +386,8 @@ function placeGhost(ev) {
   let sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
   let sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
 
-  // 一只鼠标做三维拖动：水平位置来自拖动平面（不会因视差乱跳），
-  // 高度则由"鼠标此刻压在哪个面上"决定 —— 拖到箱顶上箱子就升上去，拖回地板就落下来。
-  const hoverTargets = [floor].concat(
-    Array.from(meshes.values()).filter((m) => m.userData.uid !== dragging.uid)
-  );
-  const hoverHits = raycaster.intersectObjects(hoverTargets, false);
+  // 一只鼠标做三维拖动：水平位置跟着鼠标命中的面，
+  // 高度则由命中点的高度决定 —— 拖到高箱顶上，箱子就升上去并在那里落位。
   // 用鼠标命中点的高度（three 的 y 就是柜内高度）：压在箱顶就是箱顶高，压在地板上就是 0
   const hoverZ = hoverHits.length ? Math.max(0, hoverHits[0].point.y) : 0;
   dragging.hoverZ = hoverZ;
