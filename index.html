@@ -206,9 +206,9 @@ function rebuildScene() {
   door.position.set(L / 2, H / 2, 0);   // 相机在 +x 侧：门口朝向观察者，像真的站在柜门往里看
   door.name = 'door';
   world.add(door);
-  // 相机按新内腔重新取景
-  camera.position.set(L * 0.85, H * 2.6, W * 3.2);
-  camera.lookAt(0, H / 2, 0);
+  // 相机取景：拉近一点、视线略低于中心，柜体整体上移，不被底部面板和右下按钮挡住
+  camera.position.set(L * 0.60, H * 2.0, W * 2.4);
+  camera.lookAt(0, H * 0.34, 0);
 }
 rebuildScene();
 
@@ -264,9 +264,9 @@ function syncMesh(b) {
   return m;
 }
 
-// 相机：斜上方看整柜
-camera.position.set(L * 0.85, H * 2.6, W * 3.2);
-camera.lookAt(0, H / 2, 0);
+// 相机：斜上方看整柜（rebuildScene 里会按柜型重新取景，这里只是初值）
+camera.position.set(L * 0.60, H * 2.0, W * 2.4);
+camera.lookAt(0, H * 0.34, 0);
 
 // ---- 拖放 ----
 const raycaster = new THREE.Raycaster();
