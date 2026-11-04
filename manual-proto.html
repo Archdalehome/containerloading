@@ -374,6 +374,16 @@ function placeGhost(ev) {
   let sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
   let sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
 
+  // 一只鼠标做三维拖动：水平位置来自拖动平面（不会因视差乱跳），
+  // 高度则由"鼠标此刻压在哪个面上"决定 —— 拖到箱顶上箱子就升上去，拖回地板就落下来。
+  const hoverTargets = [floor].concat(
+    Array.from(meshes.values()).filter((m) => m.userData.uid !== dragging.uid)
+  );
+  const hoverHits = raycaster.intersectObjects(hoverTargets, false);
+  // 用鼠标命中点的高度（three 的 y 就是柜内高度）：压在箱顶就是箱顶高，压在地板上就是 0
+  const hoverZ = hoverHits.length ? Math.max(0, hoverHits[0].point.y) : 0;
+  dragging.hoverZ = hoverZ;
+
   // 拖动过程中就用松手时同一套算法算落点：所见即所得。
   //   1) 同款 L 形/斜顶在 400mm 内 → 预览"翻过来扣上"的位置（带滞后，临界点上不来回抖）
   //   2) 否则 → 预览"坐到支撑面 + 逐轴贴边"的位置
@@ -411,10 +421,12 @@ function placeGhost(ev) {
     }
   }
   if (!preview) {
-    // 默认不加高度上限（吸到脚下最高的一层）；只有用户滚轮压过高度才带上 maxZ
-    const pfOpts = dragging.zOff === null ? { tol: 150 } : { tol: 150, maxZ: dragging.zOff };
+    // 默认高度上限 = 鼠标压着的那个面的高度（这就是"一只鼠标做三维"的关键）；
+    // 滚轮压过高度时取更低的那个，方便塞进堆垛下方
+    const cap = dragging.zOff === null ? hoverZ : Math.min(dragging.zOff, hoverZ);
     const pf = CL.cornerLink.placeOnFace(
-      Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById, pfOpts);
+      Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById,
+      { tol: 150, maxZ: cap + 1 });
     if (pf.ok) preview = { box: pf.box, kind: 'face', info: pf };
     else dragging.previewFail = pf.message;
   }
