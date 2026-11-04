@@ -2040,18 +2040,46 @@
     });
     if (!poses.length) return null;
     var cols = [];
+    var asymL = item.shape === 'lshape' && Math.abs(sv.wlow - sv.whigh) > 1;
+    // 每个姿态的"倒扣上件"：必须沿剖面轴镜像 + 翻 z，否则实体互相插入。
+    // 这里先用校验同一口径（SOLID.pairFit）预检一遍，验不过的列型根本不进 DP——
+    // 不能指望最后门控兜底，那样 DP 会按"假容量"算出根本不存在的短柜长。
+    var flipCache = {};
+    function pairPoseOf(p) {
+      var ck = p.m.join(',');
+      if (Object.prototype.hasOwnProperty.call(flipCache, ck)) return flipCache[ck];
+      var fp = findFlipPose(item, p);
+      var good = null;
+      if (fp) {
+        var lo = { x: 0, y: 0, z: 0, l: p.fx, w: p.fy, h: p.thickness, pose: p.m };
+        var up = { x: 0, y: 0, z: sv.hlow, l: fp.fx, w: fp.fy, h: fp.thickness, pose: fp.m };
+        var fit = SOLID.pairFit(lo, up, item, { step: 10, tol: 1 });
+        var blockTopFlat = poseStackable(item, fp); // 拼合块的顶面必须是整块水平面，否则上面不能叠
+        if (fit.overlap <= 1 && fit.columns > 0 && (fit.gap <= 1 || asymL) && blockTopFlat) good = fp;
+      }
+      flipCache[ck] = good;
+      return good;
+    }
     poses.forEach(function (p) {
       var ny = Math.floor((container.innerW + 1e-6) / p.fy);
       if (ny <= 0) return;
-      // 普通列：一层放一只（矩形箱、或 L/斜顶当"单放"用，虽然上面站不住但底下一层没问题）
-      var layers1 = Math.floor((container.innerH + 1e-6) / p.thickness);
+      // 普通列：只能叠"顶面平整"的姿态。正放的 L 形/斜顶顶面不平（台阶/斜面），
+      // 往上压第二只必然悬空——之前按 floor(内高/层厚) 叠 4 层，就是这个假的 9.2m 来源。
+      var stackable = poseStackable(item, p);
+      var layers1 = stackable ? Math.floor((container.innerH + 1e-6) / p.thickness) : 1;
       if (layers1 > 0) cols.push({ pose: p, ny: ny, layers: layers1, pair: false, c: ny * layers1, cost: p.fx });
       // 对扣列：一正一倒成平顶块，高 = H低 + 箱高。只有它才能让上层继续站住。
       if (item.shape !== 'rect' && item.allowFlip) {
-        var pairTh = sv.hlow + bb.h;
-        var layersP = Math.floor((container.innerH + 1e-6) / pairTh);
-        if (pairTh <= container.doorH + 1e-6 && layersP > 0) {
-          cols.push({ pose: p, ny: ny, layers: layersP, pair: true, pairTh: pairTh, c: ny * layersP * 2, cost: p.fx });
+        var fp2 = pairPoseOf(p);
+        if (fp2) {
+          var pairTh = sv.hlow + bb.h;
+          var layersP = Math.floor((container.innerH + 1e-6) / pairTh);
+          if (pairTh <= container.doorH + 1e-6 && layersP > 0) {
+            cols.push({
+              pose: p, flipPose: fp2, ny: ny, layers: layersP, pair: true, pairTh: pairTh,
+              c: ny * layersP * 2, cost: p.fx
+            });
+          }
         }
       }
     });
@@ -2082,12 +2110,13 @@
     var placements = [];
     var x = 0;
     var left = q;
-    var flipPose = null;
     picks.forEach(function (col) {
       var p = col.pose;
       if (col.pair) {
-        // 对扣列：每层是"下件 + 倒扣上件"，拼成平顶块后才能继续往上叠
-        if (!flipPose) flipPose = findFlipPose(item, p);
+        // 对扣列：每层是"下件 + 倒扣上件"，拼成平顶块后才能继续往上叠。
+        // 上件姿态必须取自本列这个姿态（横放/竖放镜像轴不同），不能沿用别的列的。
+        var fp = col.flipPose;
+        if (!fp) return;
         for (var li2 = 0; li2 < col.layers && left > 0; li2++) {
           for (var yi2 = 0; yi2 < col.ny && left > 0; yi2++) {
             var zBase = li2 * col.pairTh;
@@ -2099,12 +2128,12 @@
               rot: p.fx === bb.l ? 0 : 90, layer: li2, pose: p.m, kind: 'pair-lower'
             });
             left--;
-            if (left > 0 && flipPose) {
+            if (left > 0) {
               placements.push({
                 skuId: item.id, index: 0, col: yi2 + 1, row: li2 + 1,
                 x: x, y: yBase, z: zBase + sv.hlow,
                 l: p.fx, w: p.fy, h: p.thickness,
-                rot: p.fx === bb.l ? 0 : 90, layer: li2, pose: flipPose.m,
+                rot: p.fx === bb.l ? 0 : 90, layer: li2, pose: fp.m,
                 kind: item.shape === 'lshape' ? 'pair-upper-l' : 'pair-upper'
               });
               left--;

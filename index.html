@@ -883,6 +883,8 @@ function doSmartPack() {
   if (!rows.length) { say('先在清单里填好纸箱和数量', true); return; }
   say('智能计算中…');
   let pack = null;
+  let chosen = null;
+  let candCount = 0;
   try {
     // 规则（用户定）：先把能装的都装上；箱数相同时用"最省空间"的那份布局——
     // 也就是柜长方向占用最小、余量都留在柜门侧，一眼就能看出货不够。
@@ -914,26 +916,28 @@ function doSmartPack() {
       const fillPct = (pk && pk.totals && pk.totals.fillRate) || 0;
       return Math.abs(lenPct - fillPct);
     };
-    const addCand = (pk, boxes) => {
+    const addCand = (pk, boxes, tag) => {
       if (!pk) return;
-      cands.push({ boxes, env: envelope(pk), len: lenOf(pk), gap: gapOf(pk), pack: pk });
+      cands.push({ boxes, env: envelope(pk), len: lenOf(pk), gap: gapOf(pk), pack: pk, tag: tag || '逐步贪心' });
     };
-    addCand(CL.pack.runSlices({ container: c, rows: rows, options: {} }), null);
+    addCand(CL.pack.runSlices({ container: c, rows: rows, options: {} }), null, '切片逐层');
     // 单 SKU 的"列装箱"最优解（完全背包算最短柜长）；只在物理校验通过时采用，
     // 避免把"悬空的更短方案"当最优（L 形顶面有台阶，必须成对才站得住）
     const oc = CL.pack.optimalColumns(rows, c);
-    if (oc && (CL.pack.validatePhysics(oc) || []).length === 0) addCand(oc, null);
+    if (oc && (CL.pack.validatePhysics(oc) || []).length === 0) addCand(oc, null, '对扣列最优');
     if (cands.length) cands[0].boxes = nOf(cands[0].pack);
     const plans = CL.pack.runPlans({ container: c, rows: rows, options: {} });
     (plans.ranked || []).forEach((p) => {
       if (!p.valid || p.gated || !p.pack) return;
-      addCand(p.pack, p.boxes);
+      addCand(p.pack, p.boxes, '枚举方案');
     });
-    addCand(CL.pack.run({ container: c, rows: rows, options: {} }), null);
+    addCand(CL.pack.run({ container: c, rows: rows, options: {} }), null, '逐步贪心');
     cands.forEach((x) => { if (x.boxes == null) x.boxes = nOf(x.pack); });
     // 排序：装得多 → 柜长/利用率越接近越好 → 柜长占用小 → 包络小
     cands.sort((a, b) => (b.boxes - a.boxes) || (a.gap - b.gap) || (a.len - b.len) || (a.env - b.env));
     pack = cands.length ? cands[0].pack : CL.pack.run({ container: c, rows: rows, options: {} });
+    chosen = cands.length ? cands[0] : null;
+    candCount = cands.length;
   } catch (e) {
     say('计算出错：' + ((e && e.message) || e), true);
     return;
@@ -960,11 +964,29 @@ function doSmartPack() {
   const cVol = c.innerL * c.innerW * c.innerH;
   const occupy = cVol ? Math.round(bboxVol / cVol * 1000) / 10 : null;
   const usedH = model.boxes.reduce((m, b) => Math.max(m, b.z + b.h), 0);
+  // 验证结果（用户要求：先计算、再验证，才展示）：采用哪份方案、物理校验几处错误、
+  // 与"理论最短柜长"差多少。理论下界 = 已装箱净体积 ÷ 柜内横截面积——
+  // 任何摆法都不可能比这更短，所以它是唯一可证明的参照，不是"感觉更好"。
+  let verify = '';
+  try {
+    const verr = (CL.pack.validatePhysics(pack) || []).length;
+    const netVol = model.boxes.reduce((s, b) => {
+      const it = itemsById[b.skuId];
+      const each = it && it.netVolumeEach ? it.netVolumeEach : b.l * b.w * b.h;
+      return s + each;
+    }, 0);
+    const crossArea = c.innerW * c.innerH;
+    const lb = crossArea > 0 ? netVol / crossArea : 0;
+    const usedLen = model.boxes.reduce((m, b) => Math.max(m, b.x + b.l), 0);
+    verify = '｜方案 ' + ((chosen && chosen.tag) || '逐步贪心') + '（已比较 ' + candCount + ' 份）' +
+      '｜物理校验 ' + (verr === 0 ? '0 错误' : verr + ' 处错误') +
+      '｜柜长 ' + (usedLen / 1000).toFixed(2) + 'm，理论下界 ' + (lb / 1000).toFixed(2) + 'm';
+  } catch (e) { verify = ''; }
   say('智能计算：装入 ' + loaded + ' 箱' +
     (want > loaded ? '（还有 ' + (want - loaded) + ' 箱装不下）' : '（清单里的全部装下）') +
     '｜净体积装载率 ' + (rate === null ? '—' : rate + '%') +
     '｜外廓占用 ' + (occupy === null ? '—' : occupy + '%') +
-    '｜用高 ' + Math.round(usedH) + '/' + c.innerH + 'mm');
+    '｜用高 ' + Math.round(usedH) + '/' + c.innerH + 'mm' + verify);
 }
 
 
