@@ -183,7 +183,7 @@ scene.add(world);
 let floor = null;
 /** 取景：把画面整体上抬 7%，柜体底边不被底部数据栏压住（并让 aspect 与视口一致） */
 function frameCamera() {
-  const w = innerWidth, h = innerHeight, H2 = Math.round(h * 1.30) - 40;   // -40px：整体往下挪约 1cm
+  const w = innerWidth, h = innerHeight, H2 = Math.round(h * 1.30) - 80;   // -80px：整体再往下约 1cm
   camera.aspect = w / H2;
   camera.setViewOffset(w, H2, 0, H2 - h, w, h);
   camera.updateProjectionMatrix();
