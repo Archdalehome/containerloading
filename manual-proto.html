@@ -438,18 +438,24 @@ function placeGhost(ev) {
     }
   }
   if (!preview) {
-    // 默认高度上限 = 鼠标压着的那个面的高度（这就是"一只鼠标做三维"的关键）；
-    // 滚轮压过高度时取更低的那个，方便塞进堆垛下方。
-    // 注意：按命中高度算不出来时（不同视角下射线可能落在没有箱顶的地方），
-    // 退回"脚下最高的支撑面"——否则会出现"这边能叠、那边不能叠"的怪现象。
-    const cap = dragging.zOff === null ? hoverZ : Math.min(dragging.zOff, hoverZ);
+    // 高度上限只由滚轮决定（默认不限）：落在"脚下最高的那层"。
+    // 之前用"鼠标压到的那个面"当上限，结果同一只箱子左边能叠、右边不能叠——
+    // 因为射线有没有打到那个箱顶取决于视角和遮挡，不该影响能不能叠。
+    const cap = dragging.zOff === null ? Infinity : dragging.zOff;
     let pf = CL.cornerLink.placeOnFace(
       Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById,
-      { tol: 150, maxZ: cap + 1 });
+      { tol: 150, maxZ: cap });
     if (!pf.ok) {
-      pf = CL.cornerLink.placeOnFace(
-        Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById,
-        { tol: 150 });
+      // 命中面的位置不行（视差/遮挡导致偏了一点），再试"箱子自己那一层"的平面位置
+      const p2 = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(dragPlane, p2)) {
+        const sx2 = Math.min(Math.max(p2.x + dragOffset.x + L / 2 - halfL, 0), L - b.l);
+        const sy2 = Math.min(Math.max(p2.z + dragOffset.z + W / 2 - halfW, 0), W - b.w);
+        const pf2 = CL.cornerLink.placeOnFace(
+          Object.assign({}, b, { x: sx2, y: sy2, z: c.innerH, uid: dragging.uid }), others, c, itemsById,
+          { tol: 150, maxZ: cap });
+        if (pf2.ok) { pf = pf2; sx = sx2; sy = sy2; }
+      }
     }
     if (pf.ok) preview = { box: pf.box, kind: 'face', info: pf };
     else dragging.previewFail = pf.message;
