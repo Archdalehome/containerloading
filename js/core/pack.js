@@ -2063,24 +2063,35 @@
     poses.forEach(function (p) {
       var ny = Math.floor((container.innerW + 1e-6) / p.fy);
       if (ny <= 0) return;
-      // 普通列：只能叠"顶面平整"的姿态。正放的 L 形/斜顶顶面不平（台阶/斜面），
-      // 往上压第二只必然悬空——之前按 floor(内高/层厚) 叠 4 层，就是这个假的 9.2m 来源。
-      var stackable = poseStackable(item, p);
-      var layers1 = stackable ? Math.floor((container.innerH + 1e-6) / p.thickness) : 1;
-      if (layers1 > 0) cols.push({ pose: p, ny: ny, layers: layers1, pair: false, c: ny * layers1, cost: p.fx });
-      // 对扣列：一正一倒成平顶块，高 = H低 + 箱高。只有它才能让上层继续站住。
-      if (item.shape !== 'rect' && item.allowFlip) {
-        var fp2 = pairPoseOf(p);
-        if (fp2) {
-          var pairTh = sv.hlow + bb.h;
-          var layersP = Math.floor((container.innerH + 1e-6) / pairTh);
-          if (pairTh <= container.doorH + 1e-6 && layersP > 0) {
-            cols.push({
-              pose: p, flipPose: fp2, ny: ny, layers: layersP, pair: true, pairTh: pairTh,
-              c: ny * layersP * 2, cost: p.fx
-            });
-          }
+      var cost = p.fx;
+      if (item.shape === 'rect') {
+        // 矩形箱平顶平底：层数直接取整，不用考虑对扣
+        var layers = Math.floor((container.innerH + 1e-6) / p.thickness);
+        if (layers > 0) {
+          cols.push({ pose: p, ny: ny, layers: layers, k: 0, single: false, pair: false, c: ny * layers, cost: cost });
         }
+        return;
+      }
+      // L 形/斜顶：单只顶面站不住（台阶/斜面），所以一列只能由这两种东西组成：
+      //   k 个"一正一倒"的平顶块，最上面最多再放 1 只单只（单只上方不能再压）。
+      // 高度只受柜内高限制；单只自己的高度过门高，在姿态过滤里已经挡掉了。
+      var fp = pairPoseOf(p);
+      if (!fp) {
+        // 没有合法对扣姿态：这一列只能在地面放一层单只
+        cols.push({ pose: p, ny: ny, layers: 0, k: 0, single: true, pair: false, c: ny, cost: cost });
+        return;
+      }
+      var pairTh = sv.hlow + bb.h;
+      var maxK = Math.floor((container.innerH + 1e-6) / pairTh);
+      for (var kk = 0; kk <= maxK; kk++) {
+        var baseH = kk * pairTh;
+        var withSingle = kk * pairTh + p.thickness <= container.innerH + 1e-6;
+        var cap = 2 * kk + (withSingle ? 1 : 0);
+        if (cap <= 0) continue;
+        cols.push({
+          pose: p, flipPose: fp, ny: ny, layers: kk, k: kk, single: withSingle, pair: true, pairTh: pairTh,
+          c: ny * cap, cost: cost
+        });
       }
     });
     cols = cols.filter(function (c) { return c.c > 0; });
@@ -2100,8 +2111,17 @@
       }
     }
     if (dp[q] === INF) return null;
+    // 柜长上限：dp 算的是「恰好 k 只用多长」，但没管柜子放不放得下。
+    // 之前直接按 q 回溯，会给出 25.82m 装 57 只这种超出 12m 柜的方案——
+    // 而 validatePhysics 只查支撑/贴合/穿插，不查越界，于是它会被当成「装得更多」选上。
+    // 所以这里取「dp 不超过柜内长的最大箱数」，剩下的记为装不下。
+    var bestK = 0;
+    for (var bk = q; bk >= 1; bk--) {
+      if (dp[bk] !== INF && dp[bk] <= container.innerL + 1e-6) { bestK = bk; break; }
+    }
+    if (!bestK) return null;
     var picks = [];
-    var cur = q;
+    var cur = bestK;
     var guard = 0;
     while (cur > 0 && from[cur] && guard++ < 10000) {
       picks.push(cols[from[cur].i]);
@@ -2109,7 +2129,7 @@
     }
     var placements = [];
     var x = 0;
-    var left = q;
+    var left = bestK;
     picks.forEach(function (col) {
       var p = col.pose;
       if (col.pair) {
@@ -2140,6 +2160,21 @@
             }
           }
         }
+        // 对扣块顶上再放一只单只（单只上方不再压任何箱）：斜顶 1400+900=2300 这种组合就靠它，
+        // 否则 floor(2698/1400)=1 个块，剩下 1298mm 全浪费。
+        if (col.single && left > 0) {
+          var zTop = col.k * col.pairTh;
+          for (var ys2 = 0; ys2 < col.ny && left > 0; ys2++) {
+            placements.push({
+              skuId: item.id, index: 0, col: ys2 + 1, row: col.k + 1,
+              x: x, y: ys2 * p.fy, z: zTop,
+              l: p.fx, w: p.fy, h: p.thickness,
+              rot: p.fx === bb.l ? 0 : 90, layer: col.k, pose: p.m,
+              kind: p.side ? 'side' : (p.flip ? 'flip' : 'normal')
+            });
+            left--;
+          }
+        }
         x += p.fx;
         return;
       }
@@ -2151,6 +2186,20 @@
             l: p.fx, w: p.fy, h: p.thickness,
             rot: p.fx === bb.l ? 0 : 90,
             layer: li, pose: p.m,
+            kind: p.side ? 'side' : (p.flip ? 'flip' : 'normal')
+          });
+          left--;
+        }
+      }
+      // 没有合法对扣姿态的非矩形箱：只能在地面放一层
+      if (col.single && left > 0) {
+        var zs = col.layers * p.thickness;
+        for (var ys = 0; ys < col.ny && left > 0; ys++) {
+          placements.push({
+            skuId: item.id, index: 0, col: ys + 1, row: col.layers + 1,
+            x: x, y: ys * p.fy, z: zs,
+            l: p.fx, w: p.fy, h: p.thickness,
+            rot: p.fx === bb.l ? 0 : 90, layer: col.layers, pose: p.m,
             kind: p.side ? 'side' : (p.flip ? 'flip' : 'normal')
           });
           left--;

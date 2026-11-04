@@ -28,8 +28,12 @@ console.log('起点：自动方案 ' + s.boxes.length + ' 只，最高顶面 ' +
 const t0 = Date.now();
 const rounds = 20;
 let ok = 0;
+// 从柜门那头的空位塞（自动方案是从柜头 x=0 往门口铺的，尾部一定是空的）。
+// 之前写的是 z = 最高顶面：自动方案顶面到 2400，再叠 300 就 2700 > 内高 2698，
+// 每一次都被"越界"正确拒绝，量的是拒绝路径——测试前提本身已经不成立了。
+const probeX = Math.max(0, c.innerL - 400);
 for (let i = 0; i < rounds; i++) {
-  const r = MM.add(s, { skuId: 'a', x: 0, y: 0, z: top, l: 400, w: 300, h: 300 });
+  const r = MM.add(s, { skuId: 'a', x: probeX, y: 0, z: 0, l: 400, w: 300, h: 300 });
   if (r.ok) { ok++; s.boxes.pop(); }
 }
 const per = (Date.now() - t0) / rounds;
