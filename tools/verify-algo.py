@@ -29,6 +29,9 @@ CHECKS = [
     ("/", "理论下界".encode(), "智能计算：柜长 vs 理论下界"),
     ("/", "已比较".encode(), "智能计算：已比较份数"),
     ("/", "分箱列块".encode(), "智能计算：混装列块候选"),
+    ("/js/core/pack.js", b"fillOrderViolations", "半排空度量"),
+    ("/js/core/pack.js", b"fillLane", "同一排宽度余缝填满"),
+    ("/", "半排空".encode(), "状态栏：半排空处数"),
 ]
 
 
@@ -61,6 +64,7 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 
 
