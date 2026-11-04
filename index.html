@@ -176,6 +176,13 @@ const toScene = (x, y, z) => new THREE.Vector3(x - L / 2, y, z - W / 2);
 const world = new THREE.Group();
 scene.add(world);
 let floor = null;
+/** 取景：把画面整体上抬 7%，柜体底边不被底部数据栏压住（并让 aspect 与视口一致） */
+function frameCamera() {
+  const w = innerWidth, h = innerHeight, H2 = Math.round(h * 1.14);
+  camera.aspect = w / H2;
+  camera.setViewOffset(w, H2, 0, H2 - h, w, h);
+  camera.updateProjectionMatrix();
+}
 let wireMat = null;
 function rebuildScene() {
   while (world.children.length) {
@@ -207,8 +214,9 @@ function rebuildScene() {
   door.name = 'door';
   world.add(door);
   // 相机取景：拉近一点、视线略低于中心，柜体整体上移，不被底部面板和右下按钮挡住
-  camera.position.set(L * 0.60, H * 2.0, W * 2.4);
-  camera.lookAt(0, H * 0.10, 0);
+  camera.position.set(L * 0.70, H * 2.1, W * 2.8);
+  camera.lookAt(0, H * 0.30, 0);
+  frameCamera();
 }
 rebuildScene();
 
@@ -265,8 +273,9 @@ function syncMesh(b) {
 }
 
 // 相机：斜上方看整柜（rebuildScene 里会按柜型重新取景，这里只是初值）
-camera.position.set(L * 0.60, H * 2.0, W * 2.4);
-camera.lookAt(0, H * 0.10, 0);
+camera.position.set(L * 0.70, H * 2.1, W * 2.8);
+camera.lookAt(0, H * 0.30, 0);
+frameCamera();
 
 // ---- 拖放 ----
 const raycaster = new THREE.Raycaster();
@@ -658,8 +667,7 @@ function tick() {
 requestAnimationFrame(tick);
 
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
+  frameCamera();
   renderer.setSize(innerWidth, innerHeight);
 });
 
