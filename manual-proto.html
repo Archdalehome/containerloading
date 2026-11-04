@@ -405,10 +405,14 @@ function placeGhost(ev) {
   //   2) 否则 → 预览"坐到支撑面 + 逐轴贴边"的位置
   const probe = Object.assign({}, b, { x: sx, y: sy, z: b.z, uid: dragging.uid });
   let preview = null;
-  // 正在拖的这只如果本来有配对伙伴，就不能再自动扣回它身上，否则永远拖不开
+  // 正在拖的这只如果本来有配对伙伴，就不能再自动扣回它身上，否则永远拖不开。
+  // 只排除"还钉在原位的上件"（pinned）：拖开上件后再想扣回去，是允许的。
   const pairExclude = [];
-  if (dragging.start.pairedWith) pairExclude.push(dragging.start.pairedWith);
-  others.forEach((o) => { if (o.pairedWith === dragging.uid) pairExclude.push(o.uid); });
+  if (dragging.start.pairedWith) {
+    const partner = others.find((o) => o.uid === dragging.start.pairedWith);
+    if (partner && partner.pinned) pairExclude.push(partner.uid);
+  }
+  others.forEach((o) => { if (o.pairedWith === dragging.uid && o.pinned) pairExclude.push(o.uid); });
   const ap = CL.cornerLink.autoPairOnDrop(probe, others, c, itemsById, { tol: PAIR_TOL, exclude: pairExclude });
   if (!ap.ok && ap.reason === 'asymmetric' && !dragging.asymWarned) {
     dragging.asymWarned = true;
@@ -807,6 +811,24 @@ function doPair() {
   }
   // 翻转姿态与落点一律由 corner-link 算（拖动自动对扣用的是同一套，避免两边跑偏）：
   //   L 形沿宽度镜像 + 翻 z，落 H低；斜顶沿长度镜像 + 翻 z，落 H底；x/y 与下件完全相同 → 四角重合
+  // 先试"把选中的这只翻过去扣到附近的同款箱上"——拖动自动扣不上时，用它兜底
+  {
+    const others = model.boxes.filter((o) => o.uid !== b.uid);
+    const ap = CL.cornerLink.autoPairOnDrop(b, others, c, itemsById, { tol: 1e9 });
+    if (ap.ok) {
+      model.boxes = model.boxes.map((x) => {
+        if (x.uid === b.uid) return Object.assign({}, ap.box, { uid: b.uid, pinned: true, pairedWith: ap.pairedWith });
+        if (x.uid === ap.pairedWith) return Object.assign({}, x, { paired: true });
+        return x;
+      });
+      selected = b.uid;
+      refreshAll();
+      say('已对扣：#' + b.uid + ' 翻过来扣在 #' + ap.pairedWith + ' 上｜角对齐 0/0｜落点 z=' +
+        Math.round(ap.box.z) + '｜与其它箱侵入 0mm');
+      return;
+    }
+    if (ap.reason === 'asymmetric') { say(ap.message, true); return; }
+  }
   const ph = CL.cornerLink.pairPlacement(b, it);
   if (!ph) { say('这只箱型没有可用的对扣姿态', true); return; }
   const cand = Object.assign({}, b, ph);
