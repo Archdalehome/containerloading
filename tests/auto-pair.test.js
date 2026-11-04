@@ -103,14 +103,24 @@ test('对扣位被别的箱子占着：不扣（零侵入优先）', () => {
   assert.strictEqual(r.ok, false, '被占住不该硬扣');
 });
 
-test('已对扣的两只：再拖下面那只不会去扣上面那只（不会交换位置）', () => {
+test('已对扣的两只：拖下面那只时排除自己的上件，不会再扣一次（不交换位置）', () => {
   const it = lshape('l', 900, 700, 350, 350, 300, 600);
   const items = { l: it };
   const lower = Object.assign(box('l', 0, 0, 0, 900, 700, 600, 'L1'), { paired: true });
   const upper = Object.assign(box('l', 0, 0, 300, 900, 700, 600, 'L2'), { pinned: true, pairedWith: 'L1' });
   const dragged = box('l', 80, 60, 0, 900, 700, 600, 'L1');
-  const r = L.autoPairOnDrop(dragged, [lower, upper], c, items, { tol: 400 });
-  assert.strictEqual(r.ok, false, '不该再配一次对，实际 ok=' + r.ok);
+  const r = L.autoPairOnDrop(dragged, [lower, upper], c, items, { tol: 400, exclude: ['L2'] });
+  assert.strictEqual(r.ok, false, '排除自己的上件后不该再配一次，实际 ok=' + r.ok);
+});
+
+test('配过对的箱子仍然能被别的箱子扣（不再因为"配过对"被整体排除）', () => {
+  const it = lshape('l', 900, 700, 350, 350, 300, 600);
+  const items = { l: it };
+  const lower = Object.assign(box('l', 0, 0, 0, 900, 700, 600, 'L1'), { paired: true });
+  const dragged = box('l', 60, 40, 0, 900, 700, 600, 'L3');
+  const r = L.autoPairOnDrop(dragged, [lower], c, items, { tol: 400 });
+  assert.ok(r.ok, 'L3 应该能扣到 L1 上，实际 ' + r.reason);
+  assert.strictEqual(r.pairedWith, 'L1');
 });
 
 test('exclude：把自己刚拆开的配对伙伴排除后，不会再扣回去（能拖走）', () => {

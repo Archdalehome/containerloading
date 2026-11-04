@@ -433,9 +433,9 @@
       if (exclude.indexOf(o.uid) >= 0) return;   // 刚拆开的配对伙伴：别再自动扣回去
       var oi = itemsById && itemsById[o.skuId];
       if (!sameShape(item, oi)) return;          // 只和同款箱对扣：不同尺寸扣不严
-      // 已经配过对的两只都不能再当"下件"：
-      // 否则把下面那只拖起来时，它会去扣上面那只，看起来就是两只交换了位置
-      if (o.paired || o.pairedWith || o.pinned) return;
+      // 注意：不再因为"已经配过对"就排除它——那样一旦配过一次，
+      // 这两只在系统里就再也不能互相扣，也不能再被别的箱子扣，用户会觉得"对扣坏了"。
+      // 真正的冲突交给下面的零侵入侵检查：扣位已被占住时自然会失败。
       var t = pairPlacement(o, item);
       if (!t) return;
       // 用"到这只箱子矩形的最短距离"判断远近：拖到它正上方/旁边都算贴近
