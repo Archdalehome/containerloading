@@ -686,8 +686,11 @@
         }
         if (limit <= 0) { left.push(band); continue; }
         var n = 0;
-        for (var r = 0; r < best.ny && n < limit; r++) {
-          for (var cc = 0; cc < best.nx && n < limit; cc++) {
+        // 先填满横截面（横向一排），再沿柜长往柜门方向推进。
+        // 反过来（先沿长度铺一行、再换行）会出现"贴着柜尾拉一条 6 米的长条"，
+        // 既不符合现场装柜习惯，重心也偏，用户一眼就看出不对。
+        for (var cc = 0; cc < best.nx && n < limit; cc++) {
+          for (var r = 0; r < best.ny && n < limit; r++) {
             var bx = band.x + cc * best.pose.fx;
             var by = band.y + r * best.pose.fy;
             if (!supportedAtFor(cand, best.pose, bx, by, layerZ)) continue;
@@ -861,8 +864,10 @@
       } else {
         var room = Math.min(cand.remaining, capacity);
         if (weightKnown && unitW > 0) room = Math.min(room, Math.floor(weightRoom() / unitW));
-        for (var r = 0; r < ny && placed < room; r++) {
-          for (var col = 0; col < nx && placed < room; col++) {
+        // 先横向铺满一列（把柜尾这一截面填满），再沿柜长往柜门方向推进。
+        // 反过来的顺序会先拉一条贴着柜尾的长条，柜宽方向空着——既不像现场装法，重心也偏。
+        for (var col = 0; col < nx && placed < room; col++) {
+          for (var r = 0; r < ny && placed < room; r++) {
             var bx = col * candPose.fx;
             var by = r * candPose.fy;
             if (!supportedAtFor(cand, candPose, bx, by, layerZ)) continue;
