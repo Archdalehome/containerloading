@@ -287,6 +287,8 @@
   function pairFeasible(item) {
     if (!item) return false;
     if (item.shape === 'slope') return true;
+    // L 形只有台阶对称（W低≈W高）才能真正翻扣：缺口宽度与对面高段对得上。
+    // 不对称时实测能"扣"进去却留下悬空（10 处支撑不完整），物理上站不住，所以仍然禁掉。
     if (item.shape === 'lshape') return Math.abs(item.shapeValues.wlow - item.shapeValues.whigh) <= 1;
     return false;
   }
