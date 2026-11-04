@@ -26,9 +26,15 @@
   .sku.on { border-color: #f59e0b; background: rgba(245,158,11,.08); }
   .sku .nm { font-size: 13px; color: #e2e8f0; display: flex; align-items: center; gap: 6px; }
   .sku .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
-  .sku .meta { font-size: 12px; color: #94a3b8; }
-  .sku .row2 { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+  .sku .meta { font-size: 12px; color: #94a3b8; margin-right: auto; }
+  .sku .row2 { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  .sku .row2 .btn { padding: 2px 8px; }
   .sku .cnt { margin-left: auto; font-size: 12px; color: #7dd3fc; }
+  /* 角落里的体积/利用率面板 */
+  #stats { position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px; z-index: 2;
+           background: rgba(15,23,42,.82); padding: 8px 14px; border-radius: 10px; font-size: 12px;
+           color: #cbd5e1; display: flex; gap: 16px; white-space: nowrap; }
+  #stats b { color: #7dd3fc; font-weight: 600; }
   #empty { color: #94a3b8; font-size: 12px; line-height: 1.7; margin: 6px 0 10px; }
   #form { display: none; border-top: 1px dashed #334155; margin-top: 8px; padding-top: 8px; }
   #form.on { display: block; }
@@ -85,6 +91,12 @@
       <button class="btn ghost" id="f-cancel" style="flex:1">取消</button>
     </div>
   </div>
+</div>
+<div id="stats">
+  <span>纸箱净体积 <b id="st-net">0</b> m³</span>
+  <span>外廓体积 <b id="st-outer">0</b> m³</span>
+  <span>柜内容积 <b id="st-cvol">0</b> m³</span>
+  <span>空间利用率 <b id="st-rate">0%</b></span>
 </div>
 <div id="status">状态：待拖动</div>
 <div id="stat2" style="display:none"></div>
@@ -762,10 +774,34 @@ function revalidate() {
 function paintCount() {
   // 顶部不再显示计数（用户要求移除）；状态栏与清单里已经有数量，这里只做兜底
   const el = document.getElementById('count');
-  if (!el) return;
-  const cs = CL.manualModel.counts(model);
-  el.textContent = cs.map((x) => x.name + ' ' + x.placed + '/' + x.want).join(' · ') +
-    (selected ? ' · 已选中 #' + selected : '');
+  if (el) {
+    const cs = CL.manualModel.counts(model);
+    el.textContent = cs.map((x) => x.name + ' ' + x.placed + '/' + x.want).join(' · ') +
+      (selected ? ' · 已选中 #' + selected : '');
+  }
+  paintStats();
+}
+
+/** 底部面板：纸箱净体积 / 外廓体积 / 柜内容积 / 空间利用率 */
+function paintStats() {
+  const net = document.getElementById('st-net');
+  if (!net) return;
+  let netV = 0, outerV = 0;
+  model.boxes.forEach((b) => {
+    const it = itemsById[b.skuId];
+    if (!it) return;
+    netV += CL.shapes.get(it.shape).volume(it.values || {});
+    outerV += b.l * b.w * b.h;
+  });
+  const cVol = c.innerL * c.innerW * c.innerH;
+  const m3 = (v) => (v / 1e9).toFixed(2);
+  net.textContent = m3(netV);
+  document.getElementById('st-outer').textContent = m3(outerV);
+  document.getElementById('st-cvol').textContent = m3(cVol);
+  const rate = cVol ? (netV / cVol * 100) : 0;
+  const el = document.getElementById('st-rate');
+  el.textContent = (rate > 0 ? rate.toFixed(1) : '0') + '%';
+  el.style.color = rate >= 70 ? '#4ade80' : (rate >= 45 ? '#fbbf24' : '#f87171');
 }
 
 function doRotate(axis) {
@@ -1039,10 +1075,12 @@ function renderSkuList() {
     dot.className = 'dot';
     dot.style.background = '#' + colorFor(it.id).getHexString();
     row.innerHTML =
-      '<div class="nm"><span class="dot"></span><span class="nmx"></span></div><div class="meta"></div>' +
-      '<div class="row2"><button class="btn" data-add="1">＋</button>' +
+      '<div class="nm"><span class="dot"></span><span class="nmx"></span>' +
+      '<span class="cnt"></span></div>' +
+      '<div class="row2"><span class="meta"></span>' +
+      '<button class="btn" data-add="1">＋</button>' +
       '<button class="btn ghost" data-edit="1">改</button>' +
-      '<button class="btn ghost" data-del="1">删</button><span class="cnt"></span></div>';
+      '<button class="btn ghost" data-del="1">删</button></div>';
     row.querySelector('.nmx').textContent = it.name;
     row.querySelector('.meta').textContent = summarise(it);
     row.querySelector('.cnt').textContent = x.placed + '/' + x.want;
