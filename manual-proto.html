@@ -422,11 +422,18 @@ function placeGhost(ev) {
   }
   if (!preview) {
     // 默认高度上限 = 鼠标压着的那个面的高度（这就是"一只鼠标做三维"的关键）；
-    // 滚轮压过高度时取更低的那个，方便塞进堆垛下方
+    // 滚轮压过高度时取更低的那个，方便塞进堆垛下方。
+    // 注意：按命中高度算不出来时（不同视角下射线可能落在没有箱顶的地方），
+    // 退回"脚下最高的支撑面"——否则会出现"这边能叠、那边不能叠"的怪现象。
     const cap = dragging.zOff === null ? hoverZ : Math.min(dragging.zOff, hoverZ);
-    const pf = CL.cornerLink.placeOnFace(
+    let pf = CL.cornerLink.placeOnFace(
       Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById,
       { tol: 150, maxZ: cap + 1 });
+    if (!pf.ok) {
+      pf = CL.cornerLink.placeOnFace(
+        Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById,
+        { tol: 150 });
+    }
     if (pf.ok) preview = { box: pf.box, kind: 'face', info: pf };
     else dragging.previewFail = pf.message;
   }
