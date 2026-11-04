@@ -287,8 +287,9 @@
   function pairFeasible(item) {
     if (!item) return false;
     if (item.shape === 'slope') return true;
-    // L 形只有台阶对称（W低≈W高）才能真正翻扣：缺口宽度与对面高段对得上。
-    // 不对称时实测能"扣"进去却留下悬空（10 处支撑不完整），物理上站不住，所以仍然禁掉。
+    // 台阶不对称的 L 形：翻扣本身成立（上件搭在下件高段顶上有支撑、零穿插），
+    // 但扣完顶面是两级台阶，上面没有完整支撑面，叠第二层会悬空。
+    // 所以自动排布里这类箱子只做"一层对扣"，不再往上叠；要往上叠得配平顶（垫板或对称台阶）。
     if (item.shape === 'lshape') return Math.abs(item.shapeValues.wlow - item.shapeValues.whigh) <= 1;
     return false;
   }
