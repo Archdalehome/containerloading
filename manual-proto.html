@@ -278,11 +278,18 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   dragOffset = new THREE.Vector3(
     hits[0].object.position.x - hitPoint.x, 0, hits[0].object.position.z - hitPoint.z
   );
-  dragging = { uid, mesh: hits[0].object, start: b, planeY, downX: ev.clientX, downY: ev.clientY, zOff: null };
+  // 每像素多少毫米：按住 Shift 上下拖时用它把鼠标位移换算成高度
+  const camDist = Math.abs(camera.position.y - planeY);
+  const worldH = 2 * camDist * Math.tan((camera.fov * Math.PI / 180) / 2);
+  dragging = {
+    uid, mesh: hits[0].object, start: b, planeY,
+    downX: ev.clientX, downY: ev.clientY, zOff: null,
+    mmPerPx: (worldH / innerHeight) || 5
+  };
   if (wireMat) wireMat.opacity = 0.22;      // 拖动时把柜体轮廓调淡，别挡视线
   hits[0].object.material = ghostMat;
   renderer.domElement.setPointerCapture(ev.pointerId);
-  say('拖动中：滚轮可上下调落点高度，松手落位');
+  say('拖动中：按住 Shift 上下拖 = 调高度；滚轮也行；松手落位');
 });
 
 function containerXY(mesh, b) {
@@ -328,20 +335,28 @@ function supportRectUnder(placed, h, x, y, l, w) {
 function placeGhost(ev) {
   setPointer(ev);
   raycaster.setFromCamera(pointer, camera);
-  // 水平位置一律用"箱子自己那一层高度"的平面来取，而不是鼠标正下方命中的面。
-  // 命中面定位会在穿过柜壁线、地板、别的箱顶时不断换面，箱子就跟着跳——
-  // 这才是"被集装箱轮廓线干扰"的真正原因。落在哪一层由 placeOnFace 算，不靠射线。
-  const p = new THREE.Vector3();
-  if (!raycaster.ray.intersectPlane(dragPlane, p)) return;
   const b = dragging.start;
-  let cxc = p.x + dragOffset.x + L / 2;
-  let czc = p.z + dragOffset.z + W / 2;
   const halfL = b.l / 2, halfW = b.w / 2;
-  cxc = Math.min(Math.max(cxc, halfL), L - halfL);
-  czc = Math.min(Math.max(czc, halfW), W - halfW);
-  const cand = Object.assign({}, b, { x: cxc - halfL, y: czc - halfW });
+  let bx, by;
+  if (dragging.verticalOnly && dragging.lastBX !== undefined) {
+    // 按住 Shift 只在竖直方向调整：水平位置锁住不动，免得一动鼠标箱子就横向漂
+    bx = dragging.lastBX; by = dragging.lastBY;
+  } else {
+    // 水平位置一律用"箱子自己那一层高度"的平面来取，而不是鼠标正下方命中的面。
+    // 命中面定位会在穿过柜壁线、地板、别的箱顶时不断换面，箱子就跟着跳——
+    // 这才是"被集装箱轮廓线干扰"的真正原因。落在哪一层由 placeOnFace 算，不靠射线。
+    const p = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(dragPlane, p)) return;
+    let cxc = p.x + dragOffset.x + L / 2;
+    let czc = p.z + dragOffset.z + W / 2;
+    cxc = Math.min(Math.max(cxc, halfL), L - halfL);
+    czc = Math.min(Math.max(czc, halfW), W - halfW);
+    bx = cxc - halfL; by = czc - halfW;
+    dragging.lastBX = bx; dragging.lastBY = by;
+  }
+  const cand = Object.assign({}, b, { x: bx, y: by });
   const others = model.boxes.filter((o) => o.uid !== dragging.uid);
-  const sn = CL.manual.snap(cand, others, c, SNAP_TOL);
+  const sn = CL.manual.snap(cand, others, c, 0);   // 只夹进柜内，贴边交给下面的逐轴对齐
   let sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
   let sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
 
@@ -411,18 +426,33 @@ function placeGhost(ev) {
 }
 
 renderer.domElement.addEventListener('pointermove', (ev) => {
-  if (dragging) {
-    // 拖动阈值：手指/鼠标抖几个像素不算拖动，否则"点一下选中"会顺手把箱子挪位
-    if (!dragging.moved) {
-      const d = Math.hypot(ev.clientX - dragging.downX, ev.clientY - dragging.downY);
-      if (d < 4) return;
+  if (!dragging) return;
+  // 拖动阈值：手指/鼠标抖几个像素不算拖动，否则"点一下选中"会顺手把箱子挪位
+  if (!dragging.moved) {
+    const d = Math.hypot(ev.clientX - dragging.downX, ev.clientY - dragging.downY);
+    if (d < 4) return;
+  }
+  dragging.moved = true;
+  dragging.lastX = ev.clientX;
+  dragging.lastY = ev.clientY;
+  // 按住 Shift：鼠标上下 = 箱子上下（竖直方向单独调，水平锁住）
+  if (ev.shiftKey) {
+    if (dragging.zOff === null) {
+      dragging.zOff = (dragging.snapped && dragging.snapped.z !== undefined) ? dragging.snapped.z : dragging.start.z;
     }
-    dragging.moved = true;
-    dragging.lastX = ev.clientX;
-    dragging.lastY = ev.clientY;
+    if (dragging.lastShiftY === undefined) dragging.lastShiftY = ev.clientY;
+    const dy = ev.clientY - dragging.lastShiftY;
+    dragging.lastShiftY = ev.clientY;
+    const hi = Math.max(0, c.innerH - dragging.start.h);
+    dragging.zOff = Math.max(0, Math.min(hi, dragging.zOff - dy * dragging.mmPerPx));
+    dragging.verticalOnly = true;
     placeGhost(ev);
+    say('高度上限 z=' + Math.round(dragging.zOff) + 'mm（Shift 上下拖动调高度）');
     return;
   }
+  dragging.verticalOnly = false;
+  dragging.lastShiftY = undefined;
+  placeGhost(ev);
 });
 
 // 拖动中滚轮调"允许落到的高度"：想塞进堆垛下面就把高度压下来，
