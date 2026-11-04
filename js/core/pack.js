@@ -862,11 +862,16 @@
           }
         }
       } else {
-        var room = Math.min(cand.remaining, capacity);
+        // 优先往上叠：先算"要把剩余数量装完、每层至少要占几列"，
+        // 把箱子集中在柜尾这一片 footprint 上往上堆，而不是先沿柜长平铺一层。
+        // 现场就是这么装的：柜尾先堆到顶，再往里推进。
+        var perCol = Math.max(1, ny);
+        var maxLayersLeft = Math.max(1, Math.floor((c.innerH - z) / Math.max(1, candPose.thickness)));
+        var colsNeeded = Math.max(1, Math.ceil(cand.remaining / (perCol * maxLayersLeft)));
+        var nxUse = Math.min(nx, colsNeeded);
+        var room = Math.min(cand.remaining, nxUse * ny, capacity);
         if (weightKnown && unitW > 0) room = Math.min(room, Math.floor(weightRoom() / unitW));
-        // 先横向铺满一列（把柜尾这一截面填满），再沿柜长往柜门方向推进。
-        // 反过来的顺序会先拉一条贴着柜尾的长条，柜宽方向空着——既不像现场装法，重心也偏。
-        for (var col = 0; col < nx && placed < room; col++) {
+        for (var col = 0; col < nxUse && placed < room; col++) {
           for (var r = 0; r < ny && placed < room; r++) {
             var bx = col * candPose.fx;
             var by = r * candPose.fy;
