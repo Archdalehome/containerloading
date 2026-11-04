@@ -804,6 +804,8 @@
             var aboveTotal = abovePose
               ? Math.floor((afterPair + EPS) / abovePose.thickness) * capacityOf(abovePose, c).cap
               : 0;
+            // 对扣优先的条件仍按容量择优（矩形箱规则不变）；
+            // 斜顶/L 形"强制对扣"的分支目前没有按预期触发，单独立项排查，先不动这里。
             if (pairTotal + aboveTotal >= singleTotal) {
               pair = {
                 thickness: pairThickness,
@@ -865,10 +867,16 @@
         // 优先往上叠：先算"要把剩余数量装完、每层至少要占几列"，
         // 把箱子集中在柜尾这一片 footprint 上往上堆，而不是先沿柜长平铺一层。
         // 现场就是这么装的：柜尾先堆到顶，再往里推进。
-        var perCol = Math.max(1, ny);
-        var maxLayersLeft = Math.max(1, Math.floor((c.innerH - z) / Math.max(1, candPose.thickness)));
-        var colsNeeded = Math.max(1, Math.ceil(cand.remaining / (perCol * maxLayersLeft)));
-        var nxUse = Math.min(nx, colsNeeded);
+        var nxUse = nx;
+        // 只有"能自己往上叠"的箱型才走"柜尾堆到顶"策略（矩形箱平顶平底）。
+        // 斜顶/L 形单只的顶面不能承重，硬按列数截断会变成每层只放一点点、
+        // 又叠不上去，反而装得更少（实测 50 只斜顶从 50 掉到 10）。
+        if (cand.shape === 'rect') {
+          var perCol = Math.max(1, ny);
+          var maxLayersLeft = Math.max(1, Math.floor((c.innerH - z) / Math.max(1, candPose.thickness)));
+          var colsNeeded = Math.max(1, Math.ceil(cand.remaining / (perCol * maxLayersLeft)));
+          nxUse = Math.min(nx, colsNeeded);
+        }
         var room = Math.min(cand.remaining, nxUse * ny, capacity);
         if (weightKnown && unitW > 0) room = Math.min(room, Math.floor(weightRoom() / unitW));
         for (var col = 0; col < nxUse && placed < room; col++) {
@@ -1718,9 +1726,21 @@
   }
 
   /** 排名：箱数 → 重心横向偏移 → 净体积 */
+  /** 布局在柜长方向用掉多少（从柜尾算起）：越小说明越靠柜尾堆、柜门留得越空 */
+  function usedLengthOf(plan) {
+    var ps = (plan.pack && plan.pack.placements) || [];
+    var m = 0;
+    for (var i = 0; i < ps.length; i++) m = Math.max(m, ps[i].x + ps[i].l);
+    return m;
+  }
+
   function rankCompare(a, b) {
     if (b.boxes !== a.boxes) return b.boxes - a.boxes;
     if (Math.abs(a.cog.lateral - b.cog.lateral) > 1e-9) return a.cog.lateral - b.cog.lateral;
+    // 箱数相同时，优先"靠柜尾堆起来"的方案：柜长方向占得越少越好，
+    // 这样柜门附近尽量空着，人也进得去；平铺一层的方案在这里被淘汰。
+    var la = usedLengthOf(a), lb = usedLengthOf(b);
+    if (Math.abs(la - lb) > 1) return la - lb;
     return b.net - a.net;
   }
 
