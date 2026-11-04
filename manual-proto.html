@@ -8,6 +8,9 @@
   #hud { position: fixed; left: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82); padding: 10px 14px; border-radius: 10px; }
   #hud-right { position: fixed; right: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82);
                padding: 10px 14px; border-radius: 10px; text-align: right; }
+  /* 操作按钮放在柜体轮廓右下方，离手最近 */
+  #tools { position: fixed; right: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82);
+           padding: 8px 10px; border-radius: 10px; display: flex; gap: 6px; }
   #hud b { color: #7dd3fc; }
   #status { position: fixed; left: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82); padding: 8px 14px; border-radius: 10px; min-width: 260px; }
   #status.bad { background: rgba(127,29,29,.9); }
@@ -55,13 +58,13 @@
     柜型 <select id="ctn">
       <option>20GP</option><option>40GP</option><option>40HQ</option><option>45HQ</option>
     </select>
-    <div id="dims" style="color:#94a3b8;margin-top:4px;font-size:12px"></div>
   </div>
-  <div style="margin-top:8px;font-size:13px">
-    <button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
-    <button id="cp">复制</button> <button id="un">撤销</button>
-    <button id="pair">对扣</button>
-  </div>
+  <div id="dims" style="color:#94a3b8;margin-top:4px;font-size:12px;text-align:right"></div>
+</div>
+<div id="tools">
+  <button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
+  <button id="cp">复制</button> <button id="un">撤销</button>
+  <button id="pair">对扣</button>
 </div>
 <div id="side">
   <h3>纸箱清单</h3>
