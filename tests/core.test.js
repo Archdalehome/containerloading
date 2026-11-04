@@ -56,24 +56,16 @@ test('斜顶箱 600×400，300→500 = 0.096 m³，外接高取 H高', () => {
 
 console.log('\n箱型校验');
 
-test('L形箱 W低+W高 ≠ W 必须报错并给出差值', () => {
-  const errs = S.get('lshape').checks({ L: '600', W: '400', Wlow: '160', Whigh: '200', Hlow: '300', Hhigh: '500' });
-  assert.ok(errs.length >= 1);
-  const msg = errs.map((e) => e.message).join(' | ');
-  assert.ok(msg.includes('360'), '应算出 360，实际：' + msg);
-  assert.ok(msg.includes('差 40'), '应算出差 40，实际：' + msg);
+test('L形箱总深 W 自动等于 W低+W高（传错也不报错，按自动值算）', () => {
+  const errs = S.get('lshape').checks({ L: '600', W: '999', Wlow: '160', Whigh: '200', Hlow: '300', Hhigh: '500' });
+  assert.deepStrictEqual(errs, [], '总深是自动算的，不该再报"总深不一致"');
+  const bb = S.get('lshape').bbox({ L: '600', W: '999', Wlow: '160', Whigh: '200', Hhigh: '500' });
+  assert.strictEqual(bb.w, 360, '外接深度应按 160+200=360，实际 ' + bb.w);
 });
 
-test('L形箱 W低+W高 = W 时不报错', () => {
-  const errs = S.get('lshape').checks({ L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' });
-  assert.deepStrictEqual(errs, []);
-});
-
-test('L形箱允许 0.5mm 以内的小数舍入差', () => {
-  const errs = S.get('lshape').checks({ L: '600', W: '400', Wlow: '160.2', Whigh: '239.8', Hlow: '300', Hhigh: '500' });
-  assert.deepStrictEqual(errs, []);
-  const errs2 = S.get('lshape').checks({ L: '600', W: '400', Wlow: '160', Whigh: '239', Hlow: '300', Hhigh: '500' });
-  assert.ok(errs2.length >= 1, '差 1mm 应报错');
+test('L形箱总深由 derive 补出来', () => {
+  const v = S.derive('lshape', { Wlow: '160.5', Whigh: '239.5' });
+  assert.strictEqual(v.W, '400');
 });
 
 test('L形箱 H低 ≥ H高 必须报错', () => {

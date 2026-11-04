@@ -761,14 +761,16 @@ let formShape = 'rect';
 
 function toItem(id, shapeKey, name, values, qty) {
   const shape = CL.shapes.get(shapeKey);
-  const v = {};
+  const raw = {};
   shape.fields.forEach((f) => {
-    v[f.key] = String(values && values[f.key] !== undefined && values[f.key] !== '' ? values[f.key] : shape.defaults[f.key]);
+    raw[f.key] = String(values && values[f.key] !== undefined && values[f.key] !== '' ? values[f.key] : shape.defaults[f.key]);
   });
+  // 自动字段先补上（L 形箱总深 = W低 + W高），后面各处读 v.W 就都是对的
+  const v = CL.shapes.derive(shapeKey, raw);
   const bb = shape.bbox(v);
   const n = CL.shapes.toNum;
   const sv = shapeKey === 'lshape'
-    ? { l: n(v.L), w: n(v.W), h: bb.h, wlow: n(v.Wlow), whigh: n(v.Whigh), hlow: n(v.Hlow), hhigh: n(v.Hhigh) }
+    ? { l: n(v.L), w: bb.w, h: bb.h, wlow: n(v.Wlow), whigh: n(v.Whigh), hlow: n(v.Hlow), hhigh: n(v.Hhigh) }
     : shapeKey === 'slope'
       ? { l: n(v.L), w: n(v.W), h: bb.h, hlow: n(v.Hlow), hhigh: n(v.Hhigh) }
       : { l: n(v.L), w: n(v.W), h: bb.h };
@@ -928,15 +930,38 @@ function paintForm(prefill) {
     const wrap = document.createElement('div');
     wrap.className = 'fld';
     const lb = document.createElement('label');
-    lb.textContent = f.label;
+    lb.textContent = f.auto ? f.label + '（自动）' : f.label;
     const inp = document.createElement('input');
     inp.dataset.key = f.key;
     inp.value = prefill && prefill[f.key] != null ? prefill[f.key] : shape.defaults[f.key];
     inp.setAttribute('inputmode', 'numeric');
+    if (f.auto) {
+      // 自动字段：只读，由「低段深 + 高段深」实时算出，免去手填对不上
+      inp.readOnly = true;
+      inp.style.opacity = '0.75';
+      inp.title = '自动计算：W低 + W高';
+    }
     wrap.appendChild(lb); wrap.appendChild(inp);
     box.appendChild(wrap);
   });
+  syncAutoFields();
 }
+
+/** 把自动字段按当前输入实时补上（L 形箱：总深 W = W低 + W高） */
+function syncAutoFields() {
+  const shape = CL.shapes.get(formShape);
+  const inputs = Array.from(document.querySelectorAll('#fields input'));
+  const values = {};
+  inputs.forEach((i) => { values[i.dataset.key] = i.value; });
+  const derived = CL.shapes.derive(formShape, values);
+  shape.fields.forEach((f) => {
+    if (!f.auto) return;
+    const inp = inputs.find((i) => i.dataset.key === f.key);
+    if (inp) inp.value = derived[f.key] != null ? derived[f.key] : '';
+  });
+}
+// 改「低段深 / 高段深」时，总深跟着变
+document.getElementById('fields').addEventListener('input', syncAutoFields);
 function openEdit(skuId) {
   const it = itemsById[skuId];
   if (!it) return;

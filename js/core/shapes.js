@@ -31,10 +31,22 @@
     return String(Math.round(n * 100) / 100);
   }
 
+  /** 自动字段：把不该手填的字段按几何补上（目前只有 L 形箱的总深 W = W低 + W高） */
+  function derive(key, values) {
+    var v = Object.assign({}, values || {});
+    if (key === 'lshape') {
+      var wl = toNum(v.Wlow);
+      var wh = toNum(v.Whigh);
+      if (Number.isFinite(wl) && Number.isFinite(wh)) v.W = num(wl + wh);
+    }
+    return v;
+  }
+
   function positiveErrors(shape, values) {
     var errs = [];
     for (var i = 0; i < shape.fields.length; i++) {
       var f = shape.fields[i];
+      if (f.auto) continue;              // 自动算出来的字段不校验输入
       var n = toNum(values[f.key]);
       if (!Number.isFinite(n)) {
         errs.push({ field: f.key, message: '请填写' + f.label + '（正数，单位 mm）' });
@@ -94,7 +106,8 @@
       heightKey: 'Hhigh',
       fields: [
         { key: 'L', label: '总长 L' },
-        { key: 'W', label: '总深 W' },
+        // 总深由 W低 + W高 自动得出，不再手填（手填容易和两段对不上，是历史报错最多的字段）
+        { key: 'W', label: '总深 W', auto: true },
         { key: 'Wlow', label: '低段深 W低' },
         { key: 'Whigh', label: '高段深 W高' },
         { key: 'Hlow', label: '低段高 H低' },
@@ -102,24 +115,11 @@
       ],
       defaults: { L: '600', W: '400', Wlow: '160', Whigh: '240', Hlow: '300', Hhigh: '500' },
       checks: function (values) {
+        values = derive('lshape', values);
         var errs = positiveErrors(SHAPES.lshape, values);
         var bad = badSet(errs);
-        var W = toNum(values.W);
-        var Wlow = toNum(values.Wlow);
-        var Whigh = toNum(values.Whigh);
         var Hlow = toNum(values.Hlow);
         var Hhigh = toNum(values.Hhigh);
-
-        if (!bad.W && !bad.Wlow && !bad.Whigh) {
-          var sum = Wlow + Whigh;
-          if (Math.abs(sum - W) > EPS) {
-            errs.push({
-              field: 'W',
-              message: 'W低 + W高 = ' + num(sum) + ' mm，与总深 W = ' + num(W) +
-                ' mm 不一致（差 ' + num(Math.abs(sum - W)) + ' mm）。三者必须满足 W低 + W高 = W。'
-            });
-          }
-        }
         if (!bad.Hlow && !bad.Hhigh && Hlow >= Hhigh) {
           errs.push({
             field: 'Hlow',
@@ -129,7 +129,10 @@
         return errs;
       },
       bbox: function (v) {
-        return { l: toNum(v.L), w: toNum(v.W), h: toNum(v.Hhigh) };
+        var wl = toNum(v.Wlow);
+        var wh = toNum(v.Whigh);
+        var W = (Number.isFinite(wl) && Number.isFinite(wh)) ? wl + wh : toNum(v.W);
+        return { l: toNum(v.L), w: W, h: toNum(v.Hhigh) };
       },
       volume: function (v) {
         var L = toNum(v.L);
@@ -193,6 +196,7 @@
     },
     toNum: toNum,
     num: num,
+    derive: derive,
     /** 外接长方体体积（排布用），mm³ */
     bboxVolume: function (key, values) {
       var b = SHAPES[key].bbox(values);

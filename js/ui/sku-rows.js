@@ -36,9 +36,11 @@
     var html = '<div class="fields">';
     s.fields.forEach(function (f) {
       var val = row.values[f.key] === undefined || row.values[f.key] === null ? '' : row.values[f.key];
+      // 自动字段（L 形箱的总深）= 由别的字段算出来，只读显示
+      var auto = f.auto ? ' readonly title="自动计算：W低 + W高" style="opacity:.75"' : '';
       html += '<label class="field" data-field="' + f.key + '">' +
-        '<span class="field-label">' + f.label + '</span>' +
-        '<span class="input-wrap"><input type="number" class="v-input" data-key="' + f.key + '" step="1" min="0" inputmode="decimal" value="' + esc(val) + '"><i>mm</i></span>' +
+        '<span class="field-label">' + f.label + (f.auto ? '（自动）' : '') + '</span>' +
+        '<span class="input-wrap"><input type="number" class="v-input" data-key="' + f.key + '" step="1" min="0" inputmode="decimal"' + auto + ' value="' + esc(val) + '"><i>mm</i></span>' +
         '</label>';
     });
     html += '</div>';
@@ -92,6 +94,14 @@
     Array.prototype.forEach.call(el.querySelectorAll('.v-input'), function (inp) {
       inp.addEventListener('input', function () {
         row.values[inp.dataset.key] = inp.value;
+        // 自动字段跟着变（L 形箱：总深 W = W低 + W高）
+        var derived = S.derive(row.shape, row.values);
+        S.get(row.shape).fields.forEach(function (f) {
+          if (!f.auto || derived[f.key] === undefined) return;
+          row.values[f.key] = derived[f.key];
+          var ai = el.querySelector('.v-input[data-key="' + f.key + '"]');
+          if (ai) ai.value = derived[f.key];
+        });
         refreshMeta(el, row, state);
         if (state.showErrors) paint(el, row, state);
         hooks.onChange();
