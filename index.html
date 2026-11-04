@@ -9,7 +9,7 @@
   #hud-right { position: fixed; right: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82);
                padding: 10px 14px; border-radius: 10px; text-align: right; }
   /* 操作按钮：竖直排在页面右下角 */
-  #tools { position: fixed; right: 16px; bottom: 110px; z-index: 2; background: rgba(15,23,42,.82);
+  #tools { position: fixed; right: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82);
            padding: 8px 8px; border-radius: 10px; display: flex; flex-direction: column; gap: 6px; }
   #tools .btn { width: 96px; }
   #hud b { color: #7dd3fc; }
@@ -183,7 +183,7 @@ scene.add(world);
 let floor = null;
 /** 取景：把画面整体上抬 7%，柜体底边不被底部数据栏压住（并让 aspect 与视口一致） */
 function frameCamera() {
-  const w = innerWidth, h = innerHeight, H2 = Math.round(h * 1.14);
+  const w = innerWidth, h = innerHeight, H2 = Math.round(h * 1.30);
   camera.aspect = w / H2;
   camera.setViewOffset(w, H2, 0, H2 - h, w, h);
   camera.updateProjectionMatrix();
