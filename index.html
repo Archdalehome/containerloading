@@ -870,12 +870,21 @@ function doSmartPack() {
   say('智能计算中…');
   let pack = null;
   try {
-    // 先按"一片装满再挪下一片"排（现场装法）；万一比引擎的最优方案装得少，就用引擎的
+    // 切片方案（现场装法）与引擎最优方案都算一份：先比箱数，箱数相同再比"柜长占用"。
+    // 之前无条件优先切片，导致 L 形箱全按正放沿柜长铺开（11.5m），
+    // 而引擎的侧放方案只要两层就装完、柜长占用小得多。
     const sliced = CL.pack.runSlices({ container: c, rows: rows, options: {} });
     const plain = CL.pack.run({ container: c, rows: rows, options: {} });
-    const plainN = (plain && plain.totals && plain.totals.loadedCount) || 0;
-    const sliceN = (sliced && sliced.totals && sliced.totals.loadedCount) || 0;
-    pack = (sliced && sliceN >= plainN) ? sliced : plain;
+    const nOf = (pk) => (pk && pk.totals && pk.totals.loadedCount) || 0;
+    const lenOf = (pk) => {
+      const ps = (pk && pk.placements) || [];
+      let m = 0;
+      for (const p of ps) m = Math.max(m, p.x + p.l);
+      return m;
+    };
+    pack = plain;
+    if (sliced && nOf(sliced) > nOf(plain)) pack = sliced;
+    else if (sliced && nOf(sliced) === nOf(plain) && lenOf(sliced) < lenOf(plain) - 1) pack = sliced;
   } catch (e) {
     say('计算出错：' + ((e && e.message) || e), true);
     return;
