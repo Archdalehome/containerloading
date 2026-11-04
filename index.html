@@ -757,6 +757,12 @@ function resettleAll() {
   const done = [];
   sorted.forEach((b) => {
     if (b.pinned) { done.push(b); return; }   // 对扣上件：位置由对扣决定，不能重算
+    // 已经有支撑就原样不动。智能计算铺好的层高不能被"重算重力"打乱，
+    // 否则手动拖一只箱子，整柜会跟着跳（用户报过"变混乱"）。
+    if (b.z > 0) {
+      const ct = CL.cornerLink.contactAt(b, done, itemsById);
+      if (ct.area >= b.l * b.w * 0.1) { b.invalid = false; done.push(b); return; }
+    }
     const st = CL.manual.settle(Object.assign({}, b, { z: c.innerH }), done, c, itemsById);
     if (st.ok) { b.z = st.z; b.invalid = false; }
     else { b.z = 0; b.invalid = true; }   // 没有任何支撑就掉到地上，标红让人看见
