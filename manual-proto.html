@@ -356,6 +356,18 @@ function placeGhost(ev) {
   }
   const cand = Object.assign({}, b, { x: bx, y: by });
   const others = model.boxes.filter((o) => o.uid !== dragging.uid);
+  // 按住 Shift：箱子直接浮在 zOff 高度，跟着鼠标上下动。
+  // 之前是"只能落到已有的面上"，没有面可落时箱子纹丝不动，看起来像没反应。
+  if (dragging.airborne) {
+    const z = Math.max(0, Math.min(c.innerH - b.h, dragging.zOff === null ? b.z : dragging.zOff));
+    const air = Object.assign({}, b, { x: bx, y: by, z });
+    dragging.preview = { box: air, kind: 'air' };
+    dragging.previewKind = 'air';
+    dragging.snapped = air;
+    dragging.mesh.material = ghostMat;
+    dragging.mesh.position.set(bx + halfL - L / 2, z + b.h / 2, by + halfW - W / 2);
+    return;
+  }
   const sn = CL.manual.snap(cand, others, c, 0);   // 只夹进柜内，贴边交给下面的逐轴对齐
   let sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
   let sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
@@ -446,11 +458,13 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
     const hi = Math.max(0, c.innerH - dragging.start.h);
     dragging.zOff = Math.max(0, Math.min(hi, dragging.zOff - dy * dragging.mmPerPx));
     dragging.verticalOnly = true;
+    dragging.airborne = true;
     placeGhost(ev);
-    say('高度上限 z=' + Math.round(dragging.zOff) + 'mm（Shift 上下拖动调高度）');
+    say('高度 z=' + Math.round(dragging.zOff) + 'mm（Shift 上下拖调高度，松手落到下面的面上）');
     return;
   }
   dragging.verticalOnly = false;
+  dragging.airborne = false;
   dragging.lastShiftY = undefined;
   placeGhost(ev);
 });
@@ -478,18 +492,33 @@ renderer.domElement.addEventListener('wheel', (ev) => {
 renderer.domElement.addEventListener('pointerup', (ev) => {
   if (!dragging) return;
   const { uid, mesh, start } = dragging;
-  const pv = dragging.preview;         // 拖动中实时算好的落点：所见即所得
+  let pv = dragging.preview;           // 拖动中实时算好的落点：所见即所得
   const failMsg = dragging.previewFail;
   const moved = dragging.moved === true;   // 只是点一下（没拖动）就别动它
   dragging = null;
   if (wireMat) wireMat.opacity = 0.85;      // 松手恢复柜体轮廓
   mesh.material = matFor(start.skuId);
   if (!moved) return;                      // 单击只负责选中，不动箱子
-  if (!pv) {
+  // 按住 Shift 摆出来的高度是"浮空预览"：松手时从那个高度落到下方能托住的面
+  let finalPv = pv;
+  if (pv && pv.kind === 'air') {
+    const others = model.boxes.filter((b) => b.uid !== uid);
+    const pf = CL.cornerLink.placeOnFace(
+      Object.assign({}, pv.box, { z: c.innerH, uid }), others, c, itemsById,
+      { tol: 150, maxZ: pv.box.z });
+    if (!pf.ok) {
+      syncMesh(start);
+      say('放不下：' + pf.message, true);
+      return;
+    }
+    finalPv = { box: pf.box, kind: 'face', info: pf };
+  }
+  if (!finalPv) {
     syncMesh(start);
     say('放不下：' + (failMsg || '这个位置没有可落的面'), true);
     return;
   }
+  pv = finalPv;
   if (pv.kind === 'pair') {
     model.boxes = model.boxes.map((b) => (b.uid === uid
       ? Object.assign({}, pv.box, { uid, pinned: true, pairedWith: pv.pairedWith })
