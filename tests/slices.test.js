@@ -38,7 +38,7 @@ test('50 只斜顶 600×400（300/500）：全装下，柜长只占 1.2m，堆�
   assert.strictEqual((P.validatePhysics(pk) || []).length, 0, '物理校验应零错误');
 });
 
-test('10 只 L 形 600×700：全部叠在柜尾一片里', () => {
+test('10 只 L 形 600×700（不对称台阶）：两两对扣，两片装完', () => {
   const pk = P.runSlices({
     container: c,
     rows: [row('b', 'lshape', { L: '600', W: '700', Wlow: '460', Whigh: '240', Hlow: '300', Hhigh: '500' }, 10)],
@@ -47,8 +47,9 @@ test('10 只 L 形 600×700：全部叠在柜尾一片里', () => {
   assert.ok(pk, '应有结果');
   assert.strictEqual(pk.placements.length, 10);
   const e = extent(pk);
-  assert.ok(e.len <= 700, '应只占一片，实际 ' + Math.round(e.len));
-  assert.ok(e.high >= 1500, '应往上叠，实际 ' + Math.round(e.high));
+  // 不对称台阶扣完顶面不平，一片只放一层对扣，所以 10 只要两片（1200mm）
+  assert.ok(e.len <= 1300, '应只占两片，实际 ' + Math.round(e.len));
+  assert.ok(e.high >= 700, '应做对扣（拼合高 800），实际 ' + Math.round(e.high));
   assert.strictEqual((P.validatePhysics(pk) || []).length, 0);
 });
 

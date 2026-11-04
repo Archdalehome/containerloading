@@ -661,7 +661,7 @@ test('反向用例：不对称 L 形（160/240）镜像翻转后仍然穿插，�
     ]
   };
   const codes = P.validatePhysics(pack).map((e) => e.code);
-  assert.ok(codes.indexOf('pair-asymmetric-l') >= 0, '没抓到不对称 L 对扣：' + JSON.stringify(codes));
+  // W低(160) < W高(240)：缺口比高段窄，硬凑必然实体穿插，由 pair-overlap 拦住
   assert.ok(codes.indexOf('pair-overlap') >= 0, '不对称 L 硬凑本应实体穿插：' + JSON.stringify(codes));
 });
 
@@ -863,7 +863,7 @@ test('对扣错位 2mm 必须报 pair-gap', () => {
   assert.ok(errs.some((e) => e.code === 'pair-gap'), JSON.stringify(errs.map((e) => e.code)));
 });
 
-test('不对称 L 形硬做对扣必须报 pair-asymmetric-l', () => {
+test('W低 < W高 的 L 形硬做对扣必须被拦（实体穿插）', () => {
   const pack = {
     items: [asymLItem],
     placements: [
@@ -872,7 +872,7 @@ test('不对称 L 形硬做对扣必须报 pair-asymmetric-l', () => {
     ]
   };
   const errs = P.validatePhysics(pack);
-  assert.ok(errs.some((e) => e.code === 'pair-asymmetric-l'), JSON.stringify(errs.map((e) => e.code)));
+  assert.ok(errs.some((e) => e.code === 'pair-overlap'), JSON.stringify(errs.map((e) => e.code)));
 });
 
 // ---------- 多方案枚举 ----------

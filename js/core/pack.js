@@ -287,10 +287,10 @@
   function pairFeasible(item) {
     if (!item) return false;
     if (item.shape === 'slope') return true;
-    // 台阶不对称的 L 形：翻扣本身成立（上件搭在下件高段顶上有支撑、零穿插），
-    // 但扣完顶面是两级台阶，上面没有完整支撑面，叠第二层会悬空。
-    // 所以自动排布里这类箱子只做"一层对扣"，不再往上叠；要往上叠得配平顶（垫板或对称台阶）。
-    if (item.shape === 'lshape') return Math.abs(item.shapeValues.wlow - item.shapeValues.whigh) <= 1;
+    // L 形：W低 ≥ W高 就能翻扣。差出来的宽度会留一个空洞，但上件有实打实的支撑，
+    // 不违反常识；W低 < W高 时缺口比高段窄、上件架在边缘，才真的不行。
+    // 不对称的扣完顶面是两级台阶，只能一层（由主循环在该层之后 break 保证）。
+    if (item.shape === 'lshape') return item.shapeValues.wlow >= item.shapeValues.whigh - 1;
     return false;
   }
 
@@ -1083,6 +1083,13 @@
         stop = { code: 'slope-top', message: '斜顶箱单只顶部是斜面，不能再往上叠（已按最高层计算）' };
         break;
       }
+      // 台阶不对称的 L 形：翻扣本身成立（上件搭在下件高段顶上），但顶面是两级台阶，
+      // 没有完整支撑面，再往上叠会悬空。所以这一片到此为止，下一片重新起头。
+      if (pair && cand.shape === 'lshape' &&
+          Math.abs(cand.shapeValues.wlow - cand.shapeValues.whigh) > 1) {
+        stop = { code: 'pair-step', message: '不对称台阶的 L 形已对扣，顶面不平，本片不再往上叠' };
+        break;
+      }
 
       if (weightKnown && unitW > 0 && weightRoom() < unitW) {
         stop = { code: 'weight', message: '达到最大载重 ' + S.num(c.payload) + ' kg，停止装载' };
@@ -1437,9 +1444,9 @@
       if (!u.pose || u.pose[8] !== -1) {
         errs.push({ code: 'pair-not-flipped', message: '对扣上件不是倒放', placement: u });
       }
-      if (it && it.shape === 'lshape' && Math.abs(it.shapeValues.wlow - it.shapeValues.whigh) > 1) {
-        errs.push({ code: 'pair-asymmetric-l', message: '不对称 L 形不允许对扣', placement: u });
-      }
+      // 台阶不对称的 L 形允许对扣：中间会留一个空洞，但上件搭在高段顶上、有实际支撑，
+      // 这与现场"翻过来扣上去、边上差点就差点"的做法一致（用户 2026-11 确认）。
+      var asymL = it && it.shape === 'lshape' && Math.abs(it.shapeValues.wlow - it.shapeValues.whigh) > 1;
       // 4. 实体检查：外接体重叠是对的（下件 0..500、上件 300..800），但实体不许穿插。
       //    翻转方向选错时外接体看着没问题、实体却楔进去 200mm，所以这一条必须按实体采样验。
       if (it) {
@@ -1457,7 +1464,8 @@
           });
         } else if (fit.columns === 0) {
           errs.push({ code: 'pair-nocontact', message: '对扣两箱实体没有接触面', placement: u });
-        } else if (fit.gap > 1) {
+        } else if (fit.gap > 1 && !asymL) {
+          // 不对称 L 形的"缝"就是那个空洞，属实现场允许的摆法，不算错
           errs.push({ code: 'pair-seam', message: '对扣接触面有 ' + S.num(fit.gap) + ' mm 缝隙', placement: u });
         }
       }

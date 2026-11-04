@@ -24,7 +24,9 @@ function buildPlacements(items, c, layers) {
   layers.forEach((t) => {
     const it = bySku[t.skuId];
     if (!it) throw new Error('参考解引用了不存在的 SKU');
-    if (t.kind === 'pair') throw new Error('本工具只验普通姿态层（对扣层另走 pairFit）');
+    // 对扣层由 pack.js 的 pairFit/validatePhysics 单独校验，这里跳过即可，
+    // 不要整条参考解作废（不对称 L 形现在也允许对扣，参考解里会出现这种层）
+    if (t.kind === 'pair') return;
     const pose = t.pose;
     const nx = Math.floor((c.innerL + 1e-6) / pose.fx);
     const ny = Math.floor((c.innerW + 1e-6) / pose.fy);
