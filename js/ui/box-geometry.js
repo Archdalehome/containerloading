@@ -130,3 +130,59 @@ export function matrix4FromR3(r) {
   );
   return out;
 }
+
+/** 3×3 矩阵的行列式；姿态矩阵里出现 −1 行/列组合时就是「镜像」姿态（对扣上件） */
+export function det3(r) {
+  return r[0] * (r[4] * r[8] - r[5] * r[7])
+    - r[1] * (r[3] * r[8] - r[5] * r[6])
+    + r[2] * (r[3] * r[7] - r[4] * r[6]);
+}
+
+/**
+ * 把每个三角形的顶点顺序反过来。
+ * 镜像变换（行列式 < 0）会把三角形绕序翻转成顺时针，而材质默认只画正面（FrontSide）——
+ * 不处理的话，对扣上件这种镜像姿态的箱子会画成"里外翻"的壳：看到的全是内壁，正面被剔除。
+ * 法线不用动：镜像矩阵是正交的，法线经逆转置变换后仍然朝外，错的只有绕序。
+ */
+export function flipWinding(geo) {
+  const idx = geo.getIndex();
+  if (idx) {
+    const a = idx.array;
+    for (let i = 0; i < a.length; i += 3) {
+      const t = a[i + 1];
+      a[i + 1] = a[i + 2];
+      a[i + 2] = t;
+    }
+    idx.needsUpdate = true;
+    return geo;
+  }
+  ['position', 'normal', 'uv'].forEach((name) => {
+    const attr = geo.getAttribute(name);
+    if (!attr) return;
+    const n = attr.itemSize;
+    const a = attr.array;
+    for (let i = 0; i + 2 < attr.count; i += 3) {
+      const o1 = (i + 1) * n;
+      const o2 = (i + 2) * n;
+      for (let k = 0; k < n; k++) {
+        const t = a[o1 + k];
+        a[o1 + k] = a[o2 + k];
+        a[o2 + k] = t;
+      }
+    }
+    attr.needsUpdate = true;
+  });
+  return geo;
+}
+
+/**
+ * 给几何套上姿态矩阵；镜像姿态顺手把绕序修正回来。
+ * 三处渲染（自动页 viewer、手动页 index、原型页）都必须走这个函数，
+ * 否则同一个姿态在不同页面会画得不一样。
+ */
+export function applyPose(geo, m3) {
+  geo.applyMatrix4(matrix4FromR3(m3));
+  if (det3(m3) < 0) flipWinding(geo);
+  return geo;
+}
+

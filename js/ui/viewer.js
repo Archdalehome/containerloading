@@ -13,7 +13,7 @@
  *   isReady()
  */
 import * as THREE from '../../vendor/three.module.min.js';
-import { geometryFor, edgesGeometryFor, poseMatrix3, matrix4FromR3 } from './box-geometry.js';
+import { geometryFor, edgesGeometryFor, poseMatrix3, applyPose } from './box-geometry.js';
 
 const PALETTE = [
   '#2563eb', '#0d9488', '#d97706', '#7c3aed', '#db2777',
@@ -285,7 +285,8 @@ function buildInstanced(pack) {
     if (!entry) {
       // 箱体几何带上姿态和 4mm 视觉缝；描边直接由这份几何生成，两者不可能再分叉
       const geo = geometryFor(item);
-      geo.applyMatrix4(matrix4FromR3(poseMatrix3(pose)));
+      // 镜像姿态（对扣上件）必须在这里把三角形绕序翻回来，否则箱子画成里外翻的壳
+      applyPose(geo, poseMatrix3(pose));
       entry = { geo, edges: edgesGeometryFor(geo) };
       geomCache.set(cacheKey, entry);
     }

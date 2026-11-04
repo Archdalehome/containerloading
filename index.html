@@ -139,7 +139,7 @@
 <script src="js/core/manual-model.js"></script>
 <script type="module">
 import * as THREE from './vendor/three.module.min.js';
-import { geometryFor, poseMatrix3, matrix4FromR3 } from './js/ui/box-geometry.js';
+import { geometryFor, poseMatrix3, applyPose } from './js/ui/box-geometry.js';
 
 // 柜型切换：换柜型直接带参数重载，线框 / 相机取景 / 射线平面 / 标注一起重建，
 // 不留半新半旧的场景状态。柜型确定 = 尺寸确定，本来就该整场重建。
@@ -243,7 +243,7 @@ function geoFor(skuId, pose) {
   if (!geoCache.has(key)) {
     const it = itemsById[skuId];
     const g = geometryFor(it);
-    if (pose) g.applyMatrix4(matrix4FromR3(poseMatrix3(pose)));
+    if (pose) applyPose(g, poseMatrix3(pose));
     geoCache.set(key, g);
   }
   return geoCache.get(key);
