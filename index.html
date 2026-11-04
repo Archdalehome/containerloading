@@ -907,18 +907,29 @@ function doSmartPack() {
       return m;
     };
     const cands = [];
-    const sliced = CL.pack.runSlices({ container: c, rows: rows, options: {} });
-    if (sliced) cands.push({ boxes: nOf(sliced), env: envelope(sliced), len: lenOf(sliced), pack: sliced });
+    // 平衡度：柜长占用率与空间利用率的差。两个数越接近，说明"用掉的柜长"和"装进去的货"
+    // 是匹配的，没有把布局拉长去凑；差得越大就是摊得越开。用户口径：越接近越优。
+    const gapOf = (pk) => {
+      const lenPct = c.innerL ? lenOf(pk) / c.innerL : 0;
+      const fillPct = (pk && pk.totals && pk.totals.fillRate) || 0;
+      return Math.abs(lenPct - fillPct);
+    };
+    const addCand = (pk, boxes) => {
+      if (!pk) return;
+      cands.push({ boxes, env: envelope(pk), len: lenOf(pk), gap: gapOf(pk), pack: pk });
+    };
+    addCand(CL.pack.runSlices({ container: c, rows: rows, options: {} }), null);
+    if (cands.length) cands[0].boxes = nOf(cands[0].pack);
     const plans = CL.pack.runPlans({ container: c, rows: rows, options: {} });
     (plans.ranked || []).forEach((p) => {
       if (!p.valid || p.gated || !p.pack) return;
-      cands.push({ boxes: p.boxes, env: envelope(p.pack), len: lenOf(p.pack), pack: p.pack });
+      addCand(p.pack, p.boxes);
     });
-    const plain = CL.pack.run({ container: c, rows: rows, options: {} });
-    if (plain) cands.push({ boxes: nOf(plain), env: envelope(plain), len: lenOf(plain), pack: plain });
-    // 排序：装得多 → 柜长占用小（余量集中留在柜门侧）→ 包络小（少留零散小空）
-    cands.sort((a, b) => (b.boxes - a.boxes) || (a.len - b.len) || (a.env - b.env));
-    pack = cands.length ? cands[0].pack : plain;
+    addCand(CL.pack.run({ container: c, rows: rows, options: {} }), null);
+    cands.forEach((x) => { if (x.boxes == null) x.boxes = nOf(x.pack); });
+    // 排序：装得多 → 柜长/利用率越接近越好 → 柜长占用小 → 包络小
+    cands.sort((a, b) => (b.boxes - a.boxes) || (a.gap - b.gap) || (a.len - b.len) || (a.env - b.env));
+    pack = cands.length ? cands[0].pack : CL.pack.run({ container: c, rows: rows, options: {} });
   } catch (e) {
     say('计算出错：' + ((e && e.message) || e), true);
     return;
