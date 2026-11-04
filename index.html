@@ -34,10 +34,11 @@
   .sku .row1 .cnt { margin-left: auto; font-size: 12px; color: #7dd3fc; white-space: nowrap; }
   .sku .row1 .btn { padding: 1px 6px; font-size: 12px; line-height: 18px; flex: none; }
   .sku .cnt { margin-left: auto; font-size: 12px; color: #7dd3fc; }
-  /* 角落里的体积/利用率面板 */
-  #stats { position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px; z-index: 2;
-           background: rgba(15,23,42,.82); padding: 8px 14px; border-radius: 10px; font-size: 12px;
-           color: #cbd5e1; display: flex; gap: 16px; white-space: nowrap; }
+  /* 体积/利用率：放到右上角柜型信息下面，竖排右对齐 */
+  #stats { position: fixed; right: 16px; top: 118px; z-index: 2;
+           background: rgba(15,23,42,.82); padding: 8px 12px; border-radius: 10px; font-size: 12px;
+           color: #cbd5e1; display: flex; flex-direction: column; gap: 3px; align-items: flex-end;
+           text-align: right; white-space: nowrap; }
   #stats b { color: #7dd3fc; font-weight: 600; }
   #empty { color: #94a3b8; font-size: 12px; line-height: 1.7; margin: 6px 0 10px; }
   #form { display: none; border-top: 1px dashed #334155; margin-top: 8px; padding-top: 8px; }
