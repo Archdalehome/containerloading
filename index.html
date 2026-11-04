@@ -16,7 +16,7 @@
   #status.bad { background: rgba(127,29,29,.9); }
   canvas { display: block; }
   /* 左栏：箱型列表与新建表单 */
-  #side { position: fixed; left: 16px; top: 96px; z-index: 3; width: 340px; max-height: calc(100vh - 150px); overflow-y: auto; overflow-x: hidden;
+  #side { position: fixed; left: 16px; top: 96px; z-index: 3; width: 300px; max-height: calc(100vh - 150px); overflow-y: auto; overflow-x: hidden;
           background: rgba(15,23,42,.9); border: 1px solid #1e293b; border-radius: 10px; padding: 10px 12px; }
   #side h3 { margin: 0 0 8px; font-size: 13px; color: #7dd3fc; font-weight: 600; }
   .btn { background: #1e3a8a; color: #e2e8f0; border: 1px solid #2563eb; border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -94,6 +94,9 @@
     <div class="fld" style="gap:8px">
       <button class="btn" id="f-save" style="flex:1">保存</button>
       <button class="btn ghost" id="f-cancel" style="flex:1">取消</button>
+    </div>
+    <div class="fld" id="f-del-wrap" style="display:none">
+      <button class="btn ghost" id="f-del" style="flex:1;border-color:#7f1d1d;color:#fca5a5">删除这个箱型</button>
     </div>
   </div>
 </div>
@@ -1090,15 +1093,13 @@ function renderSkuList() {
     row.innerHTML =
       '<div class="row1"><span class="dot"></span><span class="nmx"></span>' +
       '<span class="meta"></span><span class="cnt"></span>' +
-      '<button class="btn" data-add="1">＋</button>' +
-      '<button class="btn ghost" data-edit="1">改</button>' +
-      '<button class="btn ghost" data-del="1">删</button></div>';
+      '<button class="btn" data-add="1">＋</button></div>';
+    row.title = '双击修改 / 删除';
     row.querySelector('.nmx').textContent = it.name;
     row.querySelector('.meta').textContent = summarise(it);
     row.querySelector('.cnt').textContent = x.placed + '/' + x.want;
     row.querySelector('[data-add]').addEventListener('click', (ev) => { ev.stopPropagation(); addOne(it.id); });
-    row.querySelector('[data-edit]').addEventListener('click', (ev) => { ev.stopPropagation(); openEdit(it.id); });
-    row.querySelector('[data-del]').addEventListener('click', (ev) => { ev.stopPropagation(); removeSku(it.id); });
+    row.addEventListener('dblclick', (ev) => { ev.stopPropagation(); openEdit(it.id); });
     row.addEventListener('click', () => { currentSku = it.id; renderSkuList(); });
     list.appendChild(row);
   });
@@ -1246,10 +1247,12 @@ function openEdit(skuId) {
   paintForm(it.values);
   document.getElementById('f-name').value = it.name;
   document.getElementById('f-qty').value = it.qty;
+  document.getElementById('f-del-wrap').style.display = 'flex';   // 编辑态才给删除
   f.scrollIntoView({ block: 'nearest' });
 }
 function closeForm() {
   document.getElementById('form').classList.remove('on');
+  document.getElementById('f-del-wrap').style.display = 'none';
   editingSku = null;
 }
 
@@ -1262,6 +1265,7 @@ document.getElementById('new-sku').addEventListener('click', () => {
   paintForm();
   document.getElementById('f-name').value = '';
   document.getElementById('f-qty').value = '10';
+  document.getElementById('f-del-wrap').style.display = 'none';   // 新建时没有可删的
 });
 document.querySelectorAll('#shapes button').forEach((b) => {
   b.addEventListener('click', () => {
@@ -1272,6 +1276,12 @@ document.querySelectorAll('#shapes button').forEach((b) => {
 });
 document.getElementById('f-cancel').addEventListener('click', () => {
   closeForm();
+});
+document.getElementById('f-del').addEventListener('click', () => {
+  if (!editingSku) return;
+  const id = editingSku;
+  closeForm();
+  removeSku(id);
 });
 document.getElementById('f-save').addEventListener('click', () => {
   const shape = CL.shapes.get(formShape);
