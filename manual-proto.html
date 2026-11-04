@@ -16,7 +16,7 @@
   #status.bad { background: rgba(127,29,29,.9); }
   canvas { display: block; }
   /* 左栏：箱型列表与新建表单 */
-  #side { position: fixed; left: 16px; top: 132px; z-index: 3; width: 290px; max-height: calc(100vh - 210px); overflow: auto;
+  #side { position: fixed; left: 16px; top: 96px; z-index: 3; width: 290px; max-height: calc(100vh - 150px); overflow: auto;
           background: rgba(15,23,42,.9); border: 1px solid #1e293b; border-radius: 10px; padding: 10px 12px; }
   #side h3 { margin: 0 0 8px; font-size: 13px; color: #7dd3fc; font-weight: 600; }
   .btn { background: #1e3a8a; color: #e2e8f0; border: 1px solid #2563eb; border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -50,8 +50,6 @@
       <div style="font-size:11px;color:#64748b;line-height:1.2">拖箱子到位置，自动贴边 / 对扣</div>
     </div>
   </div>
-  <div id="count" style="margin-top:6px;font-size:13px;color:#7dd3fc"></div>
-  <div id="build" style="margin-top:4px;font-size:11px;color:#64748b"></div>
 </div>
 <div id="hud-right">
   <div style="font-size:13px">
@@ -560,10 +558,9 @@ function paintSelection() {
   });
 }
 
-// 版本标记：直接写在页面上，用来确认浏览器拿到的是不是新版本（缓存了会显示旧时间）
-const BUILD = '2026-11-03 23:55';
-const buildEl = document.getElementById('build');
-if (buildEl) buildEl.textContent = 'build ' + BUILD;
+// 版本标记：只在控制台打印，不占界面。排查缓存时在控制台看这一行即可
+const BUILD = '2026-11-04 08:40';
+console.info('[manual-proto] build ' + BUILD);
 
 /** 重力结算：自下而上让每只箱子重新落到它当下的支撑面上。
  *  拖走下面那只、删掉一只、转完姿态之后都要跑，否则上面的箱子会悬在空中——违反常识。 */
@@ -610,9 +607,11 @@ function revalidate() {
 }
 
 function paintCount() {
+  // 顶部不再显示计数（用户要求移除）；状态栏与清单里已经有数量，这里只做兜底
+  const el = document.getElementById('count');
+  if (!el) return;
   const cs = CL.manualModel.counts(model);
-  document.getElementById('count').textContent =
-    cs.map((x) => x.name + ' ' + x.placed + '/' + x.want).join(' · ') +
+  el.textContent = cs.map((x) => x.name + ' ' + x.placed + '/' + x.want).join(' · ') +
     (selected ? ' · 已选中 #' + selected : '');
 }
 
