@@ -8,9 +8,10 @@
   #hud { position: fixed; left: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82); padding: 10px 14px; border-radius: 10px; }
   #hud-right { position: fixed; right: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82);
                padding: 10px 14px; border-radius: 10px; text-align: right; }
-  /* 操作按钮放在柜体轮廓右下方，离手最近 */
+  /* 操作按钮：竖直排在页面右下角 */
   #tools { position: fixed; right: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82);
-           padding: 8px 10px; border-radius: 10px; display: flex; gap: 6px; }
+           padding: 8px 8px; border-radius: 10px; display: flex; flex-direction: column; gap: 6px; }
+  #tools .btn { width: 96px; }
   #hud b { color: #7dd3fc; }
   #status { position: fixed; left: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82); padding: 8px 14px; border-radius: 10px; min-width: 260px; }
   #status.bad { background: rgba(127,29,29,.9); }
