@@ -18,15 +18,17 @@ fetch = fetch_mod.fetch
 HOST = "containerloading.pages.dev"
 
 CHECKS = [
-    ("/js/core/pack.js", "对扣块顶上再放一只单只".encode(), "列最优：对扣块 + 顶部单只"),
+    ("/js/core/pack.js", "单只只能压在".encode(), "列最优：对扣块 + 顶部单只（排满才许放）"),
     ("/js/core/pack.js", "柜长上限：dp 算的是".encode(), "列最优：柜长上限（不越界）"),
     ("/js/core/pack.js", b"blockTopFlat", "对扣块顶面必须平整才允许叠"),
     ("/js/ui/box-geometry.js", b"applyPose", "姿态统一走 applyPose"),
     ("/js/core/pack.js", b"pairPoseOf", "对扣上件按本列姿态预检"),
+    ("/js/core/pack.js", b"runColumnMix", "混装分箱列块"),
     ("/", "对扣列最优".encode(), "智能计算：列最优候选"),
     ("/", "物理校验".encode(), "智能计算：验证结果一行"),
     ("/", "理论下界".encode(), "智能计算：柜长 vs 理论下界"),
     ("/", "已比较".encode(), "智能计算：已比较份数"),
+    ("/", "分箱列块".encode(), "智能计算：混装列块候选"),
 ]
 
 
@@ -59,4 +61,6 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
 
