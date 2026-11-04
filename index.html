@@ -111,6 +111,7 @@
   <span>外廓体积 <b id="st-outer">0</b> m³</span>
   <span>柜内容积 <b id="st-cvol">0</b> m³</span>
   <span>空间利用率 <b id="st-rate">0%</b></span>
+  <span>柜长占用 <b id="st-len">0%</b></span>
 </div>
 <div id="status">状态：待拖动</div>
 <div id="stat2" style="display:none"></div>
@@ -812,16 +813,16 @@ function paintCount() {
   paintStats();
 }
 
-/** 底部面板：纸箱净体积 / 外廓体积 / 柜内容积 / 空间利用率 */
+/** 底部面板：纸箱净体积 / 外廓体积 / 柜内容积 / 空间利用率 / 柜长占用 */
 function paintStats() {
   const net = document.getElementById('st-net');
   if (!net) return;
-  let netV = 0, outerV = 0;
+  let netV = 0, outerV = 0, usedLen = 0;
   model.boxes.forEach((b) => {
     const it = itemsById[b.skuId];
-    if (!it) return;
-    netV += CL.shapes.get(it.shape).volume(it.values || {});
+    if (it) netV += CL.shapes.get(it.shape).volume(it.values || {});
     outerV += b.l * b.w * b.h;
+    usedLen = Math.max(usedLen, b.x + b.l);
   });
   const cVol = c.innerL * c.innerW * c.innerH;
   const m3 = (v) => (v / 1e9).toFixed(2);
@@ -832,6 +833,13 @@ function paintStats() {
   const el = document.getElementById('st-rate');
   el.textContent = (rate > 0 ? rate.toFixed(1) : '0') + '%';
   el.style.color = rate >= 70 ? '#4ade80' : (rate >= 45 ? '#fbbf24' : '#f87171');
+  // 柜长占用：从柜尾算用来多长。货不足时这个值越低越好（余量集中在柜门侧）
+  const lb = document.getElementById('st-len');
+  if (lb) {
+    const pct = c.innerL ? usedLen / c.innerL * 100 : 0;
+    lb.textContent = (pct > 0 ? pct.toFixed(1) : '0') + '%（' + (usedLen / 1000).toFixed(2) + ' m）';
+    lb.style.color = pct <= 60 ? '#4ade80' : (pct <= 90 ? '#fbbf24' : '#f87171');
+  }
 }
 
 function doRotate(axis) {
