@@ -821,10 +821,16 @@ function doSmartPack() {
   const want = rows.reduce((s, it) => s + Number(it.qty), 0);
   const loaded = model.boxes.length;
   const rate = (pack.totals && pack.totals.fillRate) ? Math.round(pack.totals.fillRate * 1000) / 10 : null;
+  // 外廓占用：按外接长方体算，比"净体积装载率"更接近肉眼看到的占用
+  const bboxVol = model.boxes.reduce((s, b) => s + b.l * b.w * b.h, 0);
+  const cVol = c.innerL * c.innerW * c.innerH;
+  const occupy = cVol ? Math.round(bboxVol / cVol * 1000) / 10 : null;
+  const usedH = model.boxes.reduce((m, b) => Math.max(m, b.z + b.h), 0);
   say('智能计算：装入 ' + loaded + ' 箱' +
-    (want > loaded ? '（还有 ' + (want - loaded) + ' 箱装不下）' : '（全部装下）') +
-    (rate !== null ? '｜装载率 ' + rate + '%' : '') +
-    (pack.container ? '｜' + (pack.container.name || '') : ''));
+    (want > loaded ? '（还有 ' + (want - loaded) + ' 箱装不下）' : '（清单里的全部装下）') +
+    '｜净体积装载率 ' + (rate === null ? '—' : rate + '%') +
+    '｜外廓占用 ' + (occupy === null ? '—' : occupy + '%') +
+    '｜用高 ' + Math.round(usedH) + '/' + c.innerH + 'mm');
 }
 
 
