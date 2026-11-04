@@ -2039,11 +2039,23 @@
       return item.shape === 'rect' ? true : p.vertical === 2;
     });
     if (!poses.length) return null;
-    var cols = poses.map(function (p) {
+    var cols = [];
+    poses.forEach(function (p) {
       var ny = Math.floor((container.innerW + 1e-6) / p.fy);
-      var layers = Math.floor((container.innerH + 1e-6) / p.thickness);
-      return { pose: p, ny: ny, layers: layers, c: Math.max(0, ny * layers), cost: p.fx };
-    }).filter(function (c) { return c.c > 0; });
+      if (ny <= 0) return;
+      // 普通列：一层放一只（矩形箱、或 L/斜顶当"单放"用，虽然上面站不住但底下一层没问题）
+      var layers1 = Math.floor((container.innerH + 1e-6) / p.thickness);
+      if (layers1 > 0) cols.push({ pose: p, ny: ny, layers: layers1, pair: false, c: ny * layers1, cost: p.fx });
+      // 对扣列：一正一倒成平顶块，高 = H低 + 箱高。只有它才能让上层继续站住。
+      if (item.shape !== 'rect' && item.allowFlip) {
+        var pairTh = sv.hlow + bb.h;
+        var layersP = Math.floor((container.innerH + 1e-6) / pairTh);
+        if (pairTh <= container.doorH + 1e-6 && layersP > 0) {
+          cols.push({ pose: p, ny: ny, layers: layersP, pair: true, pairTh: pairTh, c: ny * layersP * 2, cost: p.fx });
+        }
+      }
+    });
+    cols = cols.filter(function (c) { return c.c > 0; });
     if (!cols.length) return null;
     var INF = Infinity;
     var dp = new Array(q + 1);
@@ -2070,8 +2082,38 @@
     var placements = [];
     var x = 0;
     var left = q;
+    var flipPose = null;
     picks.forEach(function (col) {
       var p = col.pose;
+      if (col.pair) {
+        // 对扣列：每层是"下件 + 倒扣上件"，拼成平顶块后才能继续往上叠
+        if (!flipPose) flipPose = findFlipPose(item, p);
+        for (var li2 = 0; li2 < col.layers && left > 0; li2++) {
+          for (var yi2 = 0; yi2 < col.ny && left > 0; yi2++) {
+            var zBase = li2 * col.pairTh;
+            var yBase = yi2 * p.fy;
+            placements.push({
+              skuId: item.id, index: 0, col: yi2 + 1, row: li2 + 1,
+              x: x, y: yBase, z: zBase,
+              l: p.fx, w: p.fy, h: p.thickness,
+              rot: p.fx === bb.l ? 0 : 90, layer: li2, pose: p.m, kind: 'pair-lower'
+            });
+            left--;
+            if (left > 0 && flipPose) {
+              placements.push({
+                skuId: item.id, index: 0, col: yi2 + 1, row: li2 + 1,
+                x: x, y: yBase, z: zBase + sv.hlow,
+                l: p.fx, w: p.fy, h: p.thickness,
+                rot: p.fx === bb.l ? 0 : 90, layer: li2, pose: flipPose.m,
+                kind: item.shape === 'lshape' ? 'pair-upper-l' : 'pair-upper'
+              });
+              left--;
+            }
+          }
+        }
+        x += p.fx;
+        return;
+      }
       for (var li = 0; li < col.layers && left > 0; li++) {
         for (var yi = 0; yi < col.ny && left > 0; yi++) {
           placements.push({
