@@ -181,6 +181,15 @@ function rebuildScene() {
   floor.position.set(0, 0, 0);
   floor.name = 'floor';
   world.add(floor);
+  // 柜门标记：红色半透明面。装柜必须从它的对面（柜头）开始装，门口留到最后，人才能进出
+  const door = new THREE.Mesh(
+    new THREE.PlaneGeometry(W, H),
+    new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.14, side: THREE.DoubleSide })
+  );
+  door.rotation.y = Math.PI / 2;
+  door.position.set(L / 2, H / 2, 0);   // 相机在 +x 侧：门口朝向观察者，像真的站在柜门往里看
+  door.name = 'door';
+  world.add(door);
   // 相机按新内腔重新取景
   camera.position.set(L * 0.85, H * 2.6, W * 3.2);
   camera.lookAt(0, H / 2, 0);
@@ -808,6 +817,8 @@ function doSmartPack() {
   }
   const places = (pack && pack.placements) || [];
   if (!places.length) { say('这一单没有可行方案：多半是箱高超过柜门，或尺寸超出柜内腔', true); return; }
+  // 现场原则：从最里面（柜头）开始装，柜门附近留到最后——引擎本来就是从 x=0 往柜门方向铺，
+  // 而柜门在 +x 侧（红色那一面），所以这里不用再镜像。
   skipSettle = true;                     // 引擎已经算好每只箱子的位置，别再按手工规则重排
   model.boxes = places.map((p) => ({
     skuId: p.skuId,

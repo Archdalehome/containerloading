@@ -1832,8 +1832,22 @@
     return runGreedy(state);
   }
 
+  /**
+   * 让布局从"最里面（柜头）"开始长，而不是从柜门开始。
+   * 现场装柜必须先把深入端装满，柜门附近留到最后——否则先堆在门口，人进不去、里面也装不了。
+   * 做法是把整份布局沿长度镜像（反射是等距变换，外接框不相交的关系不变），
+   * 箱子自身的朝向不动，只是位置换到另一端。
+   */
+  function mirrorX(pack) {
+    if (!pack || !pack.container || !pack.placements) return pack;
+    var innerL = pack.container.innerL;
+    pack.placements.forEach(function (p) { p.x = innerL - p.x - p.l; });
+    return pack;
+  }
+
   NS.pack = {
     run: run,
+    mirrorX: mirrorX,
     // 只给测试用的内部实现：条带填缝、缺口嵌合这些机制要单独验，不能拿「最优方案」去验
     runGreedy: runGreedy,
     runPlans: runPlans,
