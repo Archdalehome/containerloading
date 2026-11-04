@@ -874,6 +874,18 @@ function doSmartPack() {
     // 也就是柜长方向占用最小、余量都留在柜门侧，一眼就能看出货不够。
     // 所以把 48 个方案 + 切片方案都摆出来，按 (箱数↓, 柜长占用↑) 选。
     const nOf = (pk) => (pk && pk.totals && pk.totals.loadedCount) || 0;
+    // 空余空间的质量：零散小空才是浪费，集中的大空还能塞别的货。
+    // 用"占用包络体积"当代理指标——包络越小，说明箱子抱得越紧、零散缝越少。
+    const envelope = (pk) => {
+      const ps = (pk && pk.placements) || [];
+      let mx = 0, my = 0, mz = 0;
+      for (const p of ps) {
+        mx = Math.max(mx, p.x + p.l);
+        my = Math.max(my, p.y + p.w);
+        mz = Math.max(mz, p.z + p.h);
+      }
+      return mx * my * mz;
+    };
     const lenOf = (pk) => {
       const ps = (pk && pk.placements) || [];
       let m = 0;
@@ -882,15 +894,16 @@ function doSmartPack() {
     };
     const cands = [];
     const sliced = CL.pack.runSlices({ container: c, rows: rows, options: {} });
-    if (sliced) cands.push({ boxes: nOf(sliced), len: lenOf(sliced), pack: sliced });
+    if (sliced) cands.push({ boxes: nOf(sliced), env: envelope(sliced), len: lenOf(sliced), pack: sliced });
     const plans = CL.pack.runPlans({ container: c, rows: rows, options: {} });
     (plans.ranked || []).forEach((p) => {
       if (!p.valid || p.gated || !p.pack) return;
-      cands.push({ boxes: p.boxes, len: lenOf(p.pack), pack: p.pack });
+      cands.push({ boxes: p.boxes, env: envelope(p.pack), len: lenOf(p.pack), pack: p.pack });
     });
     const plain = CL.pack.run({ container: c, rows: rows, options: {} });
-    if (plain) cands.push({ boxes: nOf(plain), len: lenOf(plain), pack: plain });
-    cands.sort((a, b) => (b.boxes - a.boxes) || (a.len - b.len));
+    if (plain) cands.push({ boxes: nOf(plain), env: envelope(plain), len: lenOf(plain), pack: plain });
+    // 排序：装得多 → 柜长占用小（余量集中留在柜门侧）→ 包络小（少留零散小空）
+    cands.sort((a, b) => (b.boxes - a.boxes) || (a.len - b.len) || (a.env - b.env));
     pack = cands.length ? cands[0].pack : plain;
   } catch (e) {
     say('计算出错：' + ((e && e.message) || e), true);
