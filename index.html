@@ -919,6 +919,10 @@ function doSmartPack() {
       cands.push({ boxes, env: envelope(pk), len: lenOf(pk), gap: gapOf(pk), pack: pk });
     };
     addCand(CL.pack.runSlices({ container: c, rows: rows, options: {} }), null);
+    // 单 SKU 的"列装箱"最优解（完全背包算最短柜长）；只在物理校验通过时采用，
+    // 避免把"悬空的更短方案"当最优（L 形顶面有台阶，必须成对才站得住）
+    const oc = CL.pack.optimalColumns(rows, c);
+    if (oc && (CL.pack.validatePhysics(oc) || []).length === 0) addCand(oc, null);
     if (cands.length) cands[0].boxes = nOf(cands[0].pack);
     const plans = CL.pack.runPlans({ container: c, rows: rows, options: {} });
     (plans.ranked || []).forEach((p) => {
