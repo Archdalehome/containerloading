@@ -243,6 +243,51 @@
   }
 
   /**
+   * 支撑覆盖率：底面有多大比例落在支撑面并集上（0~1）。
+   * 用户 2026-11 定下的口径：≥50% 就算站得住——不对称 L 形翻扣后顶面是台阶，
+   * 上一层的箱子只能搭住一半，现场也这么码，所以不再要求"完整托住"。
+   */
+  function coverageRatio(F, rects) {
+    var eps = 1e-6;
+    var area = F.l * F.w;
+    if (!(area > 0)) return 0;
+    var rs = [];
+    for (var i = 0; i < rects.length; i++) {
+      var r = rects[i];
+      if (r.x < F.x + F.l - eps && r.x + r.l > F.x + eps &&
+          r.y < F.y + F.w - eps && r.y + r.w > F.y + eps) {
+        rs.push({
+          x: Math.max(r.x, F.x), y: Math.max(r.y, F.y),
+          x2: Math.min(r.x + r.l, F.x + F.l), y2: Math.min(r.y + r.w, F.y + F.w)
+        });
+      }
+    }
+    if (!rs.length) return 0;
+    var xs = [F.x, F.x + F.l];
+    rs.forEach(function (r) { xs.push(r.x, r.x2); });
+    xs = xs.filter(function (v, idx) { return xs.indexOf(v) === idx; }).sort(function (a, b) { return a - b; });
+    var covered = 0;
+    for (var k = 0; k < xs.length - 1; k++) {
+      var x0 = xs[k], x1 = xs[k + 1];
+      if (x1 - x0 < eps) continue;
+      var iv = [];
+      for (var j = 0; j < rs.length; j++) {
+        if (rs[j].x <= x0 + eps && rs[j].x2 >= x1 - eps) iv.push([rs[j].y, rs[j].y2]);
+      }
+      iv.sort(function (a, b) { return a[0] - b[0]; });
+      var y = F.y, far = F.y;
+      for (var q = 0; q < iv.length; q++) {
+        if (iv[q][0] > far + eps) break;
+        if (iv[q][1] > far) far = iv[q][1];
+      }
+      covered += (x1 - x0) * Math.max(0, Math.min(far, F.y + F.w) - F.y);
+    }
+    return covered / area;
+  }
+
+  var SUPPORT_MIN_RATIO = 0.5;   // 底面至少一半落在支撑面上
+
+  /**
    * L 形箱正放时的水平台阶面（局部 x∈[0,L]、y∈[0,W低]、z=H低），返回容器坐标矩形。
    * 只有正放（姿态矩阵的竖直轴朝上）才有水平台阶面；倒放、侧放的台阶是竖面，不承重。
    */
@@ -1083,13 +1128,8 @@
         stop = { code: 'slope-top', message: '斜顶箱单只顶部是斜面，不能再往上叠（已按最高层计算）' };
         break;
       }
-      // 台阶不对称的 L 形：翻扣本身成立（上件搭在下件高段顶上），但顶面是两级台阶，
-      // 没有完整支撑面，再往上叠会悬空。所以这一片到此为止，下一片重新起头。
-      if (pair && cand.shape === 'lshape' &&
-          Math.abs(cand.shapeValues.wlow - cand.shapeValues.whigh) > 1) {
-        stop = { code: 'pair-step', message: '不对称台阶的 L 形已对扣，顶面不平，本片不再往上叠' };
-        break;
-      }
+      // 台阶不对称的 L 形：扣完顶面是两级台阶，但按"底面 ≥50% 有支撑"的口径
+      // 上一层可以继续压上去（用户 2026-11 定），所以这里不再终止本片。
 
       if (weightKnown && unitW > 0 && weightRoom() < unitW) {
         stop = { code: 'weight', message: '达到最大载重 ' + S.num(c.payload) + ' kg，停止装载' };
