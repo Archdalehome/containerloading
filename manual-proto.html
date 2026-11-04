@@ -350,7 +350,11 @@ function placeGhost(ev) {
   //   2) 否则 → 预览"坐到支撑面 + 逐轴贴边"的位置
   const probe = Object.assign({}, b, { x: sx, y: sy, z: b.z, uid: dragging.uid });
   let preview = null;
-  const ap = CL.cornerLink.autoPairOnDrop(probe, others, c, itemsById, { tol: PAIR_TOL });
+  // 正在拖的这只如果本来有配对伙伴，就不能再自动扣回它身上，否则永远拖不开
+  const pairExclude = [];
+  if (dragging.start.pairedWith) pairExclude.push(dragging.start.pairedWith);
+  others.forEach((o) => { if (o.pairedWith === dragging.uid) pairExclude.push(o.uid); });
+  const ap = CL.cornerLink.autoPairOnDrop(probe, others, c, itemsById, { tol: PAIR_TOL, exclude: pairExclude });
   if (!ap.ok && ap.reason === 'asymmetric' && !dragging.asymWarned) {
     dragging.asymWarned = true;
     say(ap.message, true);          // 台阶不对称：说清楚为什么扣不上，别让人以为程序坏了
@@ -468,11 +472,16 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
     return;
   }
   const info = pv.info || {};
-  // 普通落位：把这只箱子从原来的配对关系里摘出来（它可能本来是扣在别人上面的那只），
-  // 否则 pinned 会让它一直不参与重力结算
+  // 普通落位：把这只箱子（和它的配对伙伴）从配对关系里一起摘出来。
+  // 只解自己是不够的——伙伴如果还是 pinned，就会永远悬在原地，拖不动也落不下来。
   model.boxes = model.boxes.map((b) => {
     if (b.uid === uid) return Object.assign({}, pv.box, { uid, pinned: false, pairedWith: undefined });
-    if (start.pairedWith && b.uid === start.pairedWith) return Object.assign({}, b, { paired: false });
+    if (start.pairedWith && b.uid === start.pairedWith) {
+      return Object.assign({}, b, { paired: false, pinned: false });   // 它原来的下件：解除配对，正常受重力
+    }
+    if (b.pairedWith === uid) {
+      return Object.assign({}, b, { paired: false, pinned: false, pairedWith: undefined }); // 原来扣在它上面的那只
+    }
     return b;
   });
   selected = uid;

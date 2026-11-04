@@ -401,8 +401,10 @@
     }
     var best = null;
     var blockedAsym = false;
+    var exclude = (opts && opts.exclude) || [];
     (placed || []).forEach(function (o) {
       if (o.uid === box.uid) return;
+      if (exclude.indexOf(o.uid) >= 0) return;   // 刚拆开的配对伙伴：别再自动扣回去
       var oi = itemsById && itemsById[o.skuId];
       if (!sameShape(item, oi)) return;          // 只和同款箱对扣：不同尺寸扣不严
       // 已经配过对的两只都不能再当"下件"：

@@ -113,5 +113,18 @@ test('已对扣的两只：再拖下面那只不会去扣上面那只（不会�
   assert.strictEqual(r.ok, false, '不该再配一次对，实际 ok=' + r.ok);
 });
 
+test('exclude：把自己刚拆开的配对伙伴排除后，不会再扣回去（能拖走）', () => {
+  const it = lshape('l', 900, 700, 350, 350, 300, 600);
+  const items = { l: it };
+  const lower = box('l', 0, 0, 0, 900, 700, 600, 'L1');
+  const dragged = box('l', 40, 30, 300, 900, 700, 600, 'L2');
+  // 不排除：会立刻扣回 L1
+  const withPair = L.autoPairOnDrop(dragged, [lower], c, items, { tol: 400 });
+  assert.ok(withPair.ok, '不排除时应能扣上');
+  // 排除 L1：不能再扣回
+  const without = L.autoPairOnDrop(dragged, [lower], c, items, { tol: 400, exclude: ['L1'] });
+  assert.strictEqual(without.ok, false, '排除后不该再扣上');
+});
+
 console.log('\n' + pass + ' 通过 / ' + fail + ' 失败\n');
 if (fail) process.exit(1);
