@@ -289,7 +289,7 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   if (wireMat) wireMat.opacity = 0.22;      // 拖动时把柜体轮廓调淡，别挡视线
   hits[0].object.material = ghostMat;
   renderer.domElement.setPointerCapture(ev.pointerId);
-  say('拖动中：按住 Shift 上下拖 = 调高度；滚轮也行；松手落位');
+  say('拖动：直接拖=水平移动；按住 Shift=左右上下一起动（自由拖动）');
 });
 
 function containerXY(mesh, b) {
@@ -359,13 +359,15 @@ function placeGhost(ev) {
   // 按住 Shift：箱子直接浮在 zOff 高度，跟着鼠标上下动。
   // 之前是"只能落到已有的面上"，没有面可落时箱子纹丝不动，看起来像没反应。
   if (dragging.airborne) {
-    const z = Math.max(0, Math.min(c.innerH - b.h, dragging.zOff === null ? b.z : dragging.zOff));
-    const air = Object.assign({}, b, { x: bx, y: by, z });
+    // 自由拖动：按鼠标算出来的三维位置直接摆，不再贴面
+    const fb = dragging.freeBox;
+    const z = Math.max(0, Math.min(c.innerH - b.h, fb ? fb.z : (dragging.zOff === null ? b.z : dragging.zOff)));
+    const air = Object.assign({}, b, { x: fb ? fb.x : bx, y: fb ? fb.y : by, z });
     dragging.preview = { box: air, kind: 'air' };
     dragging.previewKind = 'air';
     dragging.snapped = air;
     dragging.mesh.material = ghostMat;
-    dragging.mesh.position.set(bx + halfL - L / 2, z + b.h / 2, by + halfW - W / 2);
+    dragging.mesh.position.set(air.x + halfL - L / 2, z + b.h / 2, air.y + halfW - W / 2);
     return;
   }
   const sn = CL.manual.snap(cand, others, c, 0);   // 只夹进柜内，贴边交给下面的逐轴对齐
@@ -447,22 +449,47 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
   dragging.moved = true;
   dragging.lastX = ev.clientX;
   dragging.lastY = ev.clientY;
-  // 按住 Shift：鼠标上下 = 箱子上下（竖直方向单独调，水平锁住）
+  // 按住 Shift：进入"自由 3D 拖动"——箱子跟着鼠标在屏幕平面里同时左右上下走。
+  // 之前两种模式一个锁高度、一个锁水平，想同时挪就得来回切换，所以总觉得拖不到位。
   if (ev.shiftKey) {
-    if (dragging.zOff === null) {
-      dragging.zOff = (dragging.snapped && dragging.snapped.z !== undefined) ? dragging.snapped.z : dragging.start.z;
+    const halfL0 = dragging.start.l / 2, halfW0 = dragging.start.w / 2;
+    const cur = dragging.freeBox || dragging.snapped || dragging.start;
+    const curCenter = new THREE.Vector3(
+      cur.x + halfL0 - L / 2,
+      cur.z + dragging.start.h / 2,
+      cur.y + halfW0 - W / 2
+    );
+    if (!dragging.free) {
+      const n = new THREE.Vector3();
+      camera.getWorldDirection(n);
+      dragging.freePlane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, curCenter);
+      const h0 = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(dragging.freePlane, h0)) return;
+      dragging.freeOffset = curCenter.clone().sub(h0);   // 抓取偏移，避免一按 Shift 就跳
+      dragging.free = true;
+      say('自由拖动：左右移动 + 上下升降同时生效，松手落到下方平面');
     }
-    if (dragging.lastShiftY === undefined) dragging.lastShiftY = ev.clientY;
-    const dy = ev.clientY - dragging.lastShiftY;
-    dragging.lastShiftY = ev.clientY;
-    const hi = Math.max(0, c.innerH - dragging.start.h);
-    dragging.zOff = Math.max(0, Math.min(hi, dragging.zOff - dy * dragging.mmPerPx));
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(dragging.freePlane, hit)) return;
+    const ctr = hit.add(dragging.freeOffset);
+    const nx = ctr.x + L / 2 - halfL0;
+    const ny = ctr.z + W / 2 - halfW0;
+    const nz = ctr.y - dragging.start.h / 2;
+    dragging.freeBox = {
+      x: Math.max(0, Math.min(L - dragging.start.l, nx)),
+      y: Math.max(0, Math.min(W - dragging.start.w, ny)),
+      z: Math.max(0, Math.min(c.innerH - dragging.start.h, nz))
+    };
+    dragging.zOff = dragging.freeBox.z;
     dragging.verticalOnly = true;
     dragging.airborne = true;
     placeGhost(ev);
-    say('高度 z=' + Math.round(dragging.zOff) + 'mm（Shift 上下拖调高度，松手落到下面的面上）');
+    say('自由拖动中：x ' + Math.round(dragging.freeBox.x) + ' / y ' + Math.round(dragging.freeBox.y) +
+      ' / z ' + Math.round(dragging.freeBox.z) + '（松手落到下方平面）');
     return;
   }
+  dragging.free = false;
+  dragging.freeBox = null;
   dragging.verticalOnly = false;
   dragging.airborne = false;
   dragging.lastShiftY = undefined;
