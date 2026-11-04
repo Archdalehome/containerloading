@@ -379,11 +379,28 @@
    * 算出配对件的姿态与落点（角已对齐），逐只采样验零侵入，通过就返回。
    * 这是"现场把箱子翻过来扣上去"那一下，不需要人手对齐。
    */
+  /** 点到矩形的最短水平距离：落在它里面就是 0，避免"箱子大、容差显得太小" */
+  function rectDist(x, y, o) {
+    var dx = Math.max(o.x - x, 0, x - (o.x + o.l));
+    var dy = Math.max(o.y - y, 0, y - (o.y + o.w));
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
   function autoPairOnDrop(box, placed, c, itemsById, opts) {
     var tol = (opts && opts.tol !== undefined) ? opts.tol : 400;
     var item = itemsById && itemsById[box.skuId];
     if (!item || !FLIP[item.shape]) return { ok: false, reason: 'no-pair-shape', message: '这个箱型不需要对扣' };
+    var sv = item.shapeValues || {};
+    // 台阶不对称的 L 形：两只翻过来扣一定互相穿插，先说清楚，别让用户看着"落不上"猜
+    if (item.shape === 'lshape' && Math.abs((sv.wlow || 0) - (sv.whigh || 0)) > 1) {
+      return {
+        ok: false, reason: 'asymmetric',
+        message: '这只 L 形箱台阶不对称（W低 ' + Math.round(sv.wlow) + ' / W高 ' + Math.round(sv.whigh) +
+          '），两只对扣会互相穿插，扣不严；请用配套箱填缺口'
+      };
+    }
     var best = null;
+    var blockedAsym = false;
     (placed || []).forEach(function (o) {
       if (o.uid === box.uid) return;
       var oi = itemsById && itemsById[o.skuId];
@@ -393,7 +410,8 @@
       if (o.paired || o.pairedWith || o.pinned) return;
       var t = pairPlacement(o, item);
       if (!t) return;
-      var d = Math.sqrt(Math.pow(t.x - box.x, 2) + Math.pow(t.y - box.y, 2));
+      // 用"到这只箱子矩形的最短距离"判断远近：拖到它正上方/旁边都算贴近
+      var d = rectDist(box.x + box.l / 2, box.y + box.w / 2, o);
       if (d > tol) return;
       var cand = Object.assign({}, box, t, { uid: box.uid });
       if (cand.h > c.doorH + EPS) return;
@@ -405,10 +423,17 @@
         if (bad || p.uid === box.uid) return;
         if (M.overlaps(cand, p, itemsById)) bad = true;
       });
-      if (bad) return;
+      if (bad) { blockedAsym = true; return; }   // 位置被占或几何不合，继续找下一只
       if (!best || d < best.dist) best = { box: cand, lower: o, dist: Math.round(d * 10) / 10 };
     });
-    if (!best) return { ok: false, reason: 'no-pair', message: '附近 ' + tol + 'mm 内没有可对扣的同款箱' };
+    if (!best) {
+      return {
+        ok: false, reason: 'no-pair',
+        message: blockedAsym
+          ? '找到了同款箱，但对扣位置被别的箱子占着（或台阶对不上）'
+          : '附近 ' + tol + 'mm 内没有可对扣的同款箱'
+      };
+    }
     return {
       ok: true,
       box: best.box,

@@ -351,6 +351,10 @@ function placeGhost(ev) {
   const probe = Object.assign({}, b, { x: sx, y: sy, z: b.z, uid: dragging.uid });
   let preview = null;
   const ap = CL.cornerLink.autoPairOnDrop(probe, others, c, itemsById, { tol: PAIR_TOL });
+  if (!ap.ok && ap.reason === 'asymmetric' && !dragging.asymWarned) {
+    dragging.asymWarned = true;
+    say(ap.message, true);          // 台阶不对称：说清楚为什么扣不上，别让人以为程序坏了
+  }
   if (ap.ok) {
     preview = { box: ap.box, kind: 'pair', pairedWith: ap.pairedWith, dist: ap.dist, res: ap.residual };
     dragging.pairLock = { x: ap.box.x, y: ap.box.y, to: ap.pairedWith };
