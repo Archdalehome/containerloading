@@ -359,11 +359,11 @@ function placeGhost(ev) {
       tx = p.x + dragOffset.x + L / 2 - halfL;
       ty = p.z + dragOffset.z + W / 2 - halfW;
     }
-    if (!dragging.smooth) dragging.smooth = { x: tx, y: ty };
-    dragging.smooth.x += (tx - dragging.smooth.x) * 0.4;
-    dragging.smooth.y += (ty - dragging.smooth.y) * 0.4;
-    bx = Math.min(Math.max(dragging.smooth.x, 0), L - b.l);
-    by = Math.min(Math.max(dragging.smooth.y, 0), W - b.w);
+    // 位置就是鼠标算出来的那个，不做插值：松手才准。
+    // 之前 0.4 的平滑会让箱子永远落后鼠标一点，松手时落点偏开目标箱，
+    // 表现成"有时能叠、有时叠不上"。
+    bx = Math.min(Math.max(tx, 0), L - b.l);
+    by = Math.min(Math.max(ty, 0), W - b.w);
     dragging.lastBX = bx; dragging.lastBY = by;
   }
   const cand = Object.assign({}, b, { x: bx, y: by });
@@ -386,10 +386,18 @@ function placeGhost(ev) {
   let sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
   let sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
 
-  // 一只鼠标做三维拖动：水平位置跟着鼠标命中的面，
-  // 高度则由命中点的高度决定 —— 拖到高箱顶上，箱子就升上去并在那里落位。
-  // 用鼠标命中点的高度（three 的 y 就是柜内高度）：压在箱顶就是箱顶高，压在地板上就是 0
-  const hoverZ = hoverHits.length ? Math.max(0, hoverHits[0].point.y) : 0;
+  // 高度上限：鼠标压到哪只箱子，就用它整只箱子的顶面高度（压到侧面也算它顶上）。
+  // 用命中点的 y 会"压在侧面就只到半高"，于是同样瞄一个箱子，一会儿能叠一会儿不行。
+  let hoverZ = 0;
+  if (hoverHits.length) {
+    const ho = hoverHits[0].object;
+    if (ho === floor) {
+      hoverZ = 0;
+    } else {
+      const hb = model.boxes.find((x) => x.uid === ho.userData.uid);
+      hoverZ = hb ? hb.z + hb.h : Math.max(0, hoverHits[0].point.y);
+    }
+  }
   dragging.hoverZ = hoverZ;
 
   // 拖动过程中就用松手时同一套算法算落点：所见即所得。
