@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const html = fs.readFileSync(path.join(root, 'manual-proto.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const m = html.match(/<script type="module">([\s\S]*?)<\/script>/);
 if (!m) { console.log('没找到模块脚本'); process.exit(1); }
 const out = path.join(root, '.tmp-module.mjs');

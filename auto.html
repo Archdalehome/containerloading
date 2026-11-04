@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>集装箱装柜计算器 · 纸箱算柜 + 装柜图</title>
+<meta name="description" content="输入纸箱尺寸与数量，选集装箱规格，算出能装多少、怎么排，并生成可旋转的 3D 装柜图。纯前端，无需上传数据。">
+<link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="assets/favicon-16.png" sizes="16x16" type="image/png">
+<link rel="icon" href="assets/favicon-48.png" sizes="48x48" type="image/png">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">
+        <img src="assets/logo.png" alt="Container Loading" width="44" height="44">
+      </div>
+      <div class="brand-text">
+        <h1>集装箱装柜计算器</h1>
+        <p>纸箱装箱 · 装载率 · 3D 装柜图</p>
+      </div>
+    </div>
+    <div class="unit-badge">单位：毫米 / 千克</div>
+  </header>
+
+  <!-- 1. 集装箱规格 -->
+  <section class="card" id="container-card">
+    <div class="card-head">
+      <h2><span class="step">1</span>集装箱规格</h2>
+      <span class="hint">内置参数可改；箱高超过门高就进不去柜门</span>
+    </div>
+
+    <div class="preset-row" id="preset-row" role="tablist" aria-label="集装箱规格"></div>
+
+    <div class="spec-grid">
+      <label class="field">
+        <span class="field-label">内长 L</span>
+        <span class="input-wrap"><input type="number" id="spec-innerL" step="1" min="1" inputmode="decimal"><i>mm</i></span>
+      </label>
+      <label class="field">
+        <span class="field-label">内宽 W</span>
+        <span class="input-wrap"><input type="number" id="spec-innerW" step="1" min="1" inputmode="decimal"><i>mm</i></span>
+      </label>
+      <label class="field">
+        <span class="field-label">内高 H</span>
+        <span class="input-wrap"><input type="number" id="spec-innerH" step="1" min="1" inputmode="decimal"><i>mm</i></span>
+      </label>
+      <label class="field">
+        <span class="field-label">门高</span>
+        <span class="input-wrap"><input type="number" id="spec-doorH" step="1" min="1" inputmode="decimal"><i>mm</i></span>
+      </label>
+      <label class="field">
+        <span class="field-label">最大载重</span>
+        <span class="input-wrap"><input type="number" id="spec-payload" step="1" min="1" inputmode="decimal"><i>kg</i></span>
+      </label>
+    </div>
+    <div class="spec-foot">
+      <span class="spec-note" id="spec-note"></span>
+      <button type="button" class="btn ghost small" id="reset-container">恢复该规格默认值</button>
+    </div>
+  </section>
+
+  <!-- 2. 纸箱清单 -->
+  <section class="card" id="sku-card">
+    <div class="card-head">
+      <h2><span class="step">2</span>纸箱清单</h2>
+      <button type="button" class="btn primary small" id="add-sku">+ 添加箱型</button>
+    </div>
+    <div class="sku-list" id="sku-list"></div>
+    <div class="empty" id="sku-empty" hidden>还没有箱型，点右上角「+ 添加箱型」开始。</div>
+  </section>
+
+  <!-- 口径说明（红线，必须一直可见） -->
+  <div class="callout">
+    <div class="callout-title">排布口径（第一版）</div>
+    <p>
+      L 形箱与斜顶箱的<b>净体积</b>按真实几何计算；但<b>排布</b>时一律按<b>外接长方体</b>占位（保守估算）。
+      3D 图中会按真实几何显示箱体。形状咬合、翻转嵌套排布属于第二版，本版不做。
+    </p>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="btn calc" id="calc-btn">计算装柜</button>
+    <label class="toggle calc-toggle" title="层内余缝用其他箱型补满；开启后箱数只会不变或变多">
+      <input type="checkbox" id="allow-fill"> 允许跨 SKU 填缝
+    </label>
+    <label class="toggle calc-toggle" title="用垫块/纸板把 L 形台阶缺口垫平后 L 形才能继续叠；垫块需自行准备、不计货量，3D 里用灰色块标出">
+      <input type="checkbox" id="allow-dunnage"> 用垫块填平 L 形缺口（垫块需自行准备、不计货量）
+    </label>
+    <span class="actions-hint">每个箱型的「可倒放 / 可侧放」在清单里勾选；两个都不勾时按正放计算。</span>
+  </div>
+
+  <!-- 结果 -->
+  <section class="card hidden" id="result-card">
+    <div class="card-head">
+      <h2><span class="step">3</span><span id="result-title">校验结果</span></h2>
+      <div class="result-head-right">
+        <span class="hint" id="result-hint"></span>
+        <button type="button" class="btn small" id="export-btn" hidden>导出装柜清单 CSV</button>
+      </div>
+    </div>
+    <div id="result-body"></div>
+  </section>
+
+  <!-- 3D 装柜图 -->
+  <section class="card hidden" id="viewer-card">
+    <div class="card-head">
+      <h2><span class="step">4</span>3D 装柜图</h2>
+      <div class="viewer-tools">
+        <label class="tool">显示
+          <select id="layer-select" aria-label="选择显示哪一层"></select>
+        </label>
+      </div>
+    </div>
+    <div class="viewer-canvas" id="viewer-canvas"></div>
+    <div class="legend" id="viewer-legend"></div>
+    <div class="viewer-foot">
+      拖动旋转 · 滚轮缩放 · 右键拖动平移 · 点图例可高亮某个箱型。
+      L形箱 / 斜顶箱按真实几何渲染；排布位置仍是外接长方体口径（两者不一致的地方就是保守留空）。
+      <b>箱体之间那一点点缝隙只是为了看清每一箱，是渲染时每箱缩 4mm，不代表真实余量</b>，实际排布按外接长方体紧贴计算。
+    </div>
+  </section>
+
+  <!-- 使用说明：默认收起，点标题展开；展开状态记在 localStorage -->
+  <section class="card" id="help-card">
+    <button type="button" class="help-toggle" id="help-toggle" aria-expanded="false" aria-controls="help-body">
+      <span class="help-toggle-title">使用说明 · 口径与已知限制</span>
+      <span class="help-toggle-hint">先说清口径，免得把保守估算当成最优解</span>
+      <span class="help-toggle-arrow" aria-hidden="true">▾</span>
+    </button>
+    <div class="help-body" id="help-body" hidden>
+    <details class="help-seg">
+      <summary>三档前提（先看这个）</summary>
+      <div class="help-grid">
+      <div class="help-item">
+        <h3>怎么用</h3>
+        <p>选集装箱规格（内置 20GP / 40GP / 40HQ / 45HQ，参数可改）→ 加纸箱行，选形状、填尺寸与数量 → 点「计算装柜」。
+          单箱重量可以不填，但不填就只能算体积，载重和「是否超重」算不了。</p>
+      </div>
+      <div class="help-item">
+        <h3>三档前提（先看这个）</h3>
+        <p><b>无前提</b>：箱子自己就能装成，最上面的主数字只给这一档。<br>
+          <b>需垫块 N 块</b>：L 形台阶缺口要先用垫块/纸板垫平才能继续叠；垫块不是货、要自备。<br>
+          <b>需配箱 M 个</b>：用刚好塞进缺口的配套箱（尺寸 W低×(H高−H低)×L）代替垫块，能多装货，但要多发这款货。<br>
+          带前提的方案都会在方案条上标出来，勾了对应开关才会当「最优」。</p>
+      </div>
+      </div>
+    </details>
+    <details class="help-seg">
+      <summary>方案条怎么读</summary>
+      <div class="help-grid">
+      <div class="help-item">
+        <h3>方案条怎么读</h3>
+        <p>每次计算会跑 48 个方案（姿态 4 × 填缺口方式 2 × 排序 3 × 填缝 2；输入大时按规模降到 24 / 12 个）。
+          主数字是<b>零前提最优</b>；带前提的写在下面「若自备 N 块垫块可到 X 箱」。每个方案都过了物理校验，点方案条可以切 3D 对照。</p>
+      </div>
+      <div class="help-item">
+        <h3>旧版数字说明</h3>
+        <p><b>旧版那组「混装 500 箱」物理上装不出来</b>（层层压在斜顶斜面 / L 形缺口空腔上），正确值是 <b>340</b>。
+          看到旧截图或旧记录请按 340 理解，不是退步。</p>
+      </div>
+      </div>
+    </details>
+    <details class="help-seg">
+      <summary>口径与细节</summary>
+      <div class="help-grid">
+      <div class="help-item">
+        <h3>非矩形箱按外接长方体占位</h3>
+        <p>L 形箱、斜顶箱的净体积按真实几何计算，但排布时用它的外接长方体占位（保守估算），
+          3D 里才按真实形状显示。斜顶箱开「可倒放」后的对扣是两只外接体互补，不改变这个口径。</p>
+      </div>
+      <div class="help-item">
+        <h3>姿态开关：可倒放 / 可侧放</h3>
+        <p>水平 90° 旋转始终允许；每个箱型可以单独勾「可倒放」「可侧放」，程序只在允许的姿态里挑最省空间的。
+          两个开关默认都关——有「此面向上」标识的货不能随意倒放，算错的代价太大，请按实际货物勾选。</p>
+      </div>
+      <div class="help-item">
+        <h3>斜顶对扣与跨 SKU 填缝</h3>
+        <p>斜顶箱勾了「可倒放」后会尝试一正一倒成对叠放：两只拼成高度 = H低+H高 的实心块，每对省 H高−H低。
+          勾「允许跨 SKU 填缝」后，层内剩下的窄条缝会用别的小箱补满（箱数只会不变或变多）。
+          L 形箱的台阶缺口无法用另一只 L 箱填满（会互相穿插），只能靠别的小箱填。</p>
+      </div>
+      <div class="help-item">
+        <h3>不会悬空</h3>
+        <p>每箱下方必须有完整的支撑面（顶面高度与它底面相同的箱子完全覆盖它的底面），否则不摆；最底层由柜底支撑。
+          这条会跳过一些「看起来能放其实悬空」的位置，装得少一点，但装柜单能照着装。</p>
+      </div>
+      <div class="help-item">
+        <h3>箱子比门高就进不去</h3>
+        <p>箱体必须先过柜门。40HQ 内高 2698mm、门高只有 2585mm，2600mm 的箱子里头放得下也进不了门，
+          程序按门高拦截并写明具体数值。内高和门高都可以在规格里改。</p>
+      </div>
+      <div class="help-item">
+        <h3>结果怎么读</h3>
+        <p>体积装载率 = 已装箱净体积 ÷ 柜内容积；分层明细一层一个箱型，层高累加不超过内高；
+          装不完时会给出剩余箱数、原因，以及同规格柜还需要几个。</p>
+      </div>
+      <div class="help-item">
+        <h3>3D 图里那点缝隙</h3>
+        <p>每箱渲染时缩了 4mm 以便看清是哪一箱，<b>只是视觉效果，不代表真实余量</b>；
+          排布位置仍按外接长方体紧贴计算。箱体描边是一个整体几何，不会拖慢交互。</p>
+      </div>
+      <div class="help-item">
+        <h3>为什么有空间却装不进去</h3>
+        <p>装载率下面有一栏「为什么停」，把剩余空间拆成<b>可承重</b>和<b>不可承重</b>：
+          斜面（斜顶箱单只，放上去就塌）、顶面零碎（顶面高低不齐，一整只箱跨不过去）、高度不足（层数取整）。
+          每条阻塞原因后面会给能解锁的开关和能到多少箱。</p>
+      </div>
+      <div class="help-item">
+        <h3>同款箱换姿态填条带</h3>
+        <p>主姿态铺满后剩下的窄带，会先用<b>同款箱的其它姿态</b>（转 90°、侧放）去塞，
+          塞不下的才交给别的箱型；分层明细里「主姿态 / 换姿态填条带」分开列。
+          条带里的箱子可以比本层高（那一片上面不再叠层），但仍须下方有完整支撑。</p>
+      </div>
+      <div class="help-item">
+        <h3>默认不限方向，限制由你按 SKU 定</h3>
+        <p>现实里纸箱可以任意方向摆，所以默认「允许侧放 / 允许倒放」都是勾上的，系统按几何判断哪些面真能放平：
+          矩形 6 个面、斜顶 5 个（斜面朝下放不住）、L 形 5 个（台阶面朝下放不住）。
+          <b>有「此面向上」标识、易碎必须立放的货，在那一行取消勾选</b>，没勾的姿态不会出现在任何方案里。</p>
+        <p>侧放、倒扣之后的承重面按<b>真实接触面</b>算（斜面、台阶竖面不承重），不会因为外接体看着平就让你叠上去。</p>
+        <p>斜顶箱 / L 形箱的倒放只用于「一正一倒对扣」的上件——它们单独倒过来没有水平底面，落地就是斜面或台阶。</p>
+      </div>
+      <div class="help-item">
+        <h3>装不下时看「所需柜数」</h3>
+        <p>装不完时，结果页会按同规格柜重算剩余货物还需要几个柜，并列出每柜装多少箱；
+          超过门高或底面超尺寸的箱子换柜也装不进，会单独列出来说明要改箱型。</p>
+      </div>
+      <div class="help-item">
+        <h3>结果页最下面的「本单体检」</h3>
+        <p>四项：越界箱数、两两重叠、悬空 / 压斜面、渲染与占位的最大偏差，<b>都应该是 0</b>。
+          不是 0 时会写明第几层哪一箱、哪个坐标差多少——把那一栏截图发过来就能直接定位，
+          不用再复述参数。</p>
+      </div>
+      </div>
+    </details>
+    <details class="help-seg">
+      <summary>已知限制</summary>
+      <ul class="help-limits">
+        <li>一层一个主箱型，层内余缝才跨 SKU 填；不做三维任意摆放。</li>
+        <li>L 形台阶缺口只能靠别的箱子或垫块填，同款 L 互相填会穿插（几何上无解）。</li>
+        <li>载重要靠单箱重量，没填重量只能算体积，载重界记为「未约束」。</li>
+        <li>上界是放宽后的估计：差距为 0 才标「已证明最优」，否则「差距 N 箱（受放宽影响）」。</li>
+        <li>侧躺互补块已评估未做：密度 0.1114 低于竖直对扣 0.1133，见 RELEASE.md。</li>
+      </ul>
+    </details>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>装柜计算器 · M4 导出与补柜</span>
+    <span>内部计算一律毫米；显示时换算为米 / 立方米。</span>
+  </footer>
+</div>
+
+<script src="js/core/shapes.js"></script>
+<script src="js/core/containers.js"></script>
+<script src="js/core/validate.js"></script>
+<script src="js/core/solid.js"></script>
+<script src="js/core/pack.js"></script>
+<script src="js/core/layerdp.js"></script>
+<script src="js/core/explain.js"></script>
+<script src="js/core/report.js"></script>
+<script src="js/core/storage.js"></script>
+<script src="js/ui/container-panel.js"></script>
+<script src="js/ui/sku-rows.js"></script>
+<script src="js/ui/result.js"></script>
+<script src="js/ui/health.js"></script>
+<script src="js/ui/diag.js"></script>
+<script src="js/ui/export-csv.js"></script>
+<script src="js/ui/help.js"></script>
+<script src="js/app.js"></script>
+<script type="module" src="js/ui/viewer.js"></script>
+</body>
+</html>

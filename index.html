@@ -2,278 +2,1259 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>集装箱装柜计算器 · 纸箱算柜 + 装柜图</title>
-<meta name="description" content="输入纸箱尺寸与数量，选集装箱规格，算出能装多少、怎么排，并生成可旋转的 3D 装柜图。纯前端，无需上传数据。">
-<link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="assets/favicon-16.png" sizes="16x16" type="image/png">
-<link rel="icon" href="assets/favicon-48.png" sizes="48x48" type="image/png">
-<link rel="icon" href="assets/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<link rel="stylesheet" href="css/style.css">
+<title>集装箱装柜计算 · 手动摆放 + 智能计算</title>
+<style>
+  body { margin: 0; background: #0f172a; color: #e2e8f0; font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; }
+  #hud { position: fixed; left: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82); padding: 10px 14px; border-radius: 10px; }
+  #hud-right { position: fixed; right: 16px; top: 14px; z-index: 2; background: rgba(15,23,42,.82);
+               padding: 10px 14px; border-radius: 10px; text-align: right; }
+  /* 操作按钮放在柜体轮廓右下方，离手最近 */
+  #tools { position: fixed; right: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82);
+           padding: 8px 10px; border-radius: 10px; display: flex; gap: 6px; }
+  #hud b { color: #7dd3fc; }
+  #status { position: fixed; left: 16px; bottom: 16px; z-index: 2; background: rgba(15,23,42,.82); padding: 8px 14px; border-radius: 10px; min-width: 260px; }
+  #status.bad { background: rgba(127,29,29,.9); }
+  canvas { display: block; }
+  /* 左栏：箱型列表与新建表单 */
+  #side { position: fixed; left: 16px; top: 96px; z-index: 3; width: 290px; max-height: calc(100vh - 150px); overflow: auto;
+          background: rgba(15,23,42,.9); border: 1px solid #1e293b; border-radius: 10px; padding: 10px 12px; }
+  #side h3 { margin: 0 0 8px; font-size: 13px; color: #7dd3fc; font-weight: 600; }
+  .btn { background: #1e3a8a; color: #e2e8f0; border: 1px solid #2563eb; border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  .btn:hover { background: #1d4ed8; }
+  .btn.ghost { background: transparent; border-color: #334155; }
+  .sku { border: 1px solid #1e293b; border-radius: 8px; padding: 7px 9px; margin-bottom: 7px; cursor: pointer; }
+  .sku.on { border-color: #f59e0b; background: rgba(245,158,11,.08); }
+  .sku .nm { font-size: 13px; color: #e2e8f0; display: flex; align-items: center; gap: 6px; }
+  .sku .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .sku .meta { font-size: 12px; color: #94a3b8; }
+  .sku .row2 { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+  .sku .cnt { margin-left: auto; font-size: 12px; color: #7dd3fc; }
+  #empty { color: #94a3b8; font-size: 12px; line-height: 1.7; margin: 6px 0 10px; }
+  #form { display: none; border-top: 1px dashed #334155; margin-top: 8px; padding-top: 8px; }
+  #form.on { display: block; }
+  #form .fld { display: flex; gap: 6px; margin-bottom: 6px; }
+  #form label { font-size: 12px; color: #94a3b8; width: 84px; flex: none; line-height: 26px; }
+  #form input, #form select { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 5px; padding: 3px 6px; width: 100%; font: inherit; }
+  #form .err { color: #fca5a5; font-size: 12px; min-height: 16px; }
+  #shapes { display: flex; gap: 6px; margin-bottom: 6px; }
+  #shapes button { flex: 1; background: #0f172a; color: #cbd5e1; border: 1px solid #334155; border-radius: 5px; padding: 4px 0; cursor: pointer; font: inherit; }
+  #shapes button.on { border-color: #38bdf8; color: #38bdf8; }
+</style>
 </head>
 <body>
-<div class="wrap">
-
-  <header class="topbar">
-    <div class="brand">
-      <div class="logo">
-        <img src="assets/logo.png" alt="Container Loading" width="44" height="44">
-      </div>
-      <div class="brand-text">
-        <h1>集装箱装柜计算器</h1>
-        <p>纸箱装箱 · 装载率 · 3D 装柜图</p>
-      </div>
+<div id="hud">
+  <div style="display:flex;align-items:center;gap:9px">
+    <img src="assets/logo.png" alt="logo" style="width:28px;height:28px;border-radius:6px;flex:none">
+    <div>
+      <div style="font-size:14px;color:#e2e8f0;line-height:1.2">手动装柜</div>
+      <div style="font-size:11px;color:#64748b;line-height:1.2">拖箱子摆放，或点「智能计算」自动装满</div>
     </div>
-    <div class="unit-badge">单位：毫米 / 千克</div>
-  </header>
-
-  <!-- 1. 集装箱规格 -->
-  <section class="card" id="container-card">
-    <div class="card-head">
-      <h2><span class="step">1</span>集装箱规格</h2>
-      <span class="hint">内置参数可改；箱高超过门高就进不去柜门</span>
-    </div>
-
-    <div class="preset-row" id="preset-row" role="tablist" aria-label="集装箱规格"></div>
-
-    <div class="spec-grid">
-      <label class="field">
-        <span class="field-label">内长 L</span>
-        <span class="input-wrap"><input type="number" id="spec-innerL" step="1" min="1" inputmode="decimal"><i>mm</i></span>
-      </label>
-      <label class="field">
-        <span class="field-label">内宽 W</span>
-        <span class="input-wrap"><input type="number" id="spec-innerW" step="1" min="1" inputmode="decimal"><i>mm</i></span>
-      </label>
-      <label class="field">
-        <span class="field-label">内高 H</span>
-        <span class="input-wrap"><input type="number" id="spec-innerH" step="1" min="1" inputmode="decimal"><i>mm</i></span>
-      </label>
-      <label class="field">
-        <span class="field-label">门高</span>
-        <span class="input-wrap"><input type="number" id="spec-doorH" step="1" min="1" inputmode="decimal"><i>mm</i></span>
-      </label>
-      <label class="field">
-        <span class="field-label">最大载重</span>
-        <span class="input-wrap"><input type="number" id="spec-payload" step="1" min="1" inputmode="decimal"><i>kg</i></span>
-      </label>
-    </div>
-    <div class="spec-foot">
-      <span class="spec-note" id="spec-note"></span>
-      <button type="button" class="btn ghost small" id="reset-container">恢复该规格默认值</button>
-    </div>
-  </section>
-
-  <!-- 2. 纸箱清单 -->
-  <section class="card" id="sku-card">
-    <div class="card-head">
-      <h2><span class="step">2</span>纸箱清单</h2>
-      <button type="button" class="btn primary small" id="add-sku">+ 添加箱型</button>
-    </div>
-    <div class="sku-list" id="sku-list"></div>
-    <div class="empty" id="sku-empty" hidden>还没有箱型，点右上角「+ 添加箱型」开始。</div>
-  </section>
-
-  <!-- 口径说明（红线，必须一直可见） -->
-  <div class="callout">
-    <div class="callout-title">排布口径（第一版）</div>
-    <p>
-      L 形箱与斜顶箱的<b>净体积</b>按真实几何计算；但<b>排布</b>时一律按<b>外接长方体</b>占位（保守估算）。
-      3D 图中会按真实几何显示箱体。形状咬合、翻转嵌套排布属于第二版，本版不做。
-    </p>
   </div>
-
-  <div class="actions">
-    <button type="button" class="btn calc" id="calc-btn">计算装柜</button>
-    <label class="toggle calc-toggle" title="层内余缝用其他箱型补满；开启后箱数只会不变或变多">
-      <input type="checkbox" id="allow-fill"> 允许跨 SKU 填缝
-    </label>
-    <label class="toggle calc-toggle" title="用垫块/纸板把 L 形台阶缺口垫平后 L 形才能继续叠；垫块需自行准备、不计货量，3D 里用灰色块标出">
-      <input type="checkbox" id="allow-dunnage"> 用垫块填平 L 形缺口（垫块需自行准备、不计货量）
-    </label>
-    <span class="actions-hint">每个箱型的「可倒放 / 可侧放」在清单里勾选；两个都不勾时按正放计算。</span>
-  </div>
-
-  <!-- 结果 -->
-  <section class="card hidden" id="result-card">
-    <div class="card-head">
-      <h2><span class="step">3</span><span id="result-title">校验结果</span></h2>
-      <div class="result-head-right">
-        <span class="hint" id="result-hint"></span>
-        <button type="button" class="btn small" id="export-btn" hidden>导出装柜清单 CSV</button>
-      </div>
-    </div>
-    <div id="result-body"></div>
-  </section>
-
-  <!-- 3D 装柜图 -->
-  <section class="card hidden" id="viewer-card">
-    <div class="card-head">
-      <h2><span class="step">4</span>3D 装柜图</h2>
-      <div class="viewer-tools">
-        <label class="tool">显示
-          <select id="layer-select" aria-label="选择显示哪一层"></select>
-        </label>
-      </div>
-    </div>
-    <div class="viewer-canvas" id="viewer-canvas"></div>
-    <div class="legend" id="viewer-legend"></div>
-    <div class="viewer-foot">
-      拖动旋转 · 滚轮缩放 · 右键拖动平移 · 点图例可高亮某个箱型。
-      L形箱 / 斜顶箱按真实几何渲染；排布位置仍是外接长方体口径（两者不一致的地方就是保守留空）。
-      <b>箱体之间那一点点缝隙只是为了看清每一箱，是渲染时每箱缩 4mm，不代表真实余量</b>，实际排布按外接长方体紧贴计算。
-    </div>
-  </section>
-
-  <!-- 使用说明：默认收起，点标题展开；展开状态记在 localStorage -->
-  <section class="card" id="help-card">
-    <button type="button" class="help-toggle" id="help-toggle" aria-expanded="false" aria-controls="help-body">
-      <span class="help-toggle-title">使用说明 · 口径与已知限制</span>
-      <span class="help-toggle-hint">先说清口径，免得把保守估算当成最优解</span>
-      <span class="help-toggle-arrow" aria-hidden="true">▾</span>
-    </button>
-    <div class="help-body" id="help-body" hidden>
-    <details class="help-seg">
-      <summary>三档前提（先看这个）</summary>
-      <div class="help-grid">
-      <div class="help-item">
-        <h3>怎么用</h3>
-        <p>选集装箱规格（内置 20GP / 40GP / 40HQ / 45HQ，参数可改）→ 加纸箱行，选形状、填尺寸与数量 → 点「计算装柜」。
-          单箱重量可以不填，但不填就只能算体积，载重和「是否超重」算不了。</p>
-      </div>
-      <div class="help-item">
-        <h3>三档前提（先看这个）</h3>
-        <p><b>无前提</b>：箱子自己就能装成，最上面的主数字只给这一档。<br>
-          <b>需垫块 N 块</b>：L 形台阶缺口要先用垫块/纸板垫平才能继续叠；垫块不是货、要自备。<br>
-          <b>需配箱 M 个</b>：用刚好塞进缺口的配套箱（尺寸 W低×(H高−H低)×L）代替垫块，能多装货，但要多发这款货。<br>
-          带前提的方案都会在方案条上标出来，勾了对应开关才会当「最优」。</p>
-      </div>
-      </div>
-    </details>
-    <details class="help-seg">
-      <summary>方案条怎么读</summary>
-      <div class="help-grid">
-      <div class="help-item">
-        <h3>方案条怎么读</h3>
-        <p>每次计算会跑 48 个方案（姿态 4 × 填缺口方式 2 × 排序 3 × 填缝 2；输入大时按规模降到 24 / 12 个）。
-          主数字是<b>零前提最优</b>；带前提的写在下面「若自备 N 块垫块可到 X 箱」。每个方案都过了物理校验，点方案条可以切 3D 对照。</p>
-      </div>
-      <div class="help-item">
-        <h3>旧版数字说明</h3>
-        <p><b>旧版那组「混装 500 箱」物理上装不出来</b>（层层压在斜顶斜面 / L 形缺口空腔上），正确值是 <b>340</b>。
-          看到旧截图或旧记录请按 340 理解，不是退步。</p>
-      </div>
-      </div>
-    </details>
-    <details class="help-seg">
-      <summary>口径与细节</summary>
-      <div class="help-grid">
-      <div class="help-item">
-        <h3>非矩形箱按外接长方体占位</h3>
-        <p>L 形箱、斜顶箱的净体积按真实几何计算，但排布时用它的外接长方体占位（保守估算），
-          3D 里才按真实形状显示。斜顶箱开「可倒放」后的对扣是两只外接体互补，不改变这个口径。</p>
-      </div>
-      <div class="help-item">
-        <h3>姿态开关：可倒放 / 可侧放</h3>
-        <p>水平 90° 旋转始终允许；每个箱型可以单独勾「可倒放」「可侧放」，程序只在允许的姿态里挑最省空间的。
-          两个开关默认都关——有「此面向上」标识的货不能随意倒放，算错的代价太大，请按实际货物勾选。</p>
-      </div>
-      <div class="help-item">
-        <h3>斜顶对扣与跨 SKU 填缝</h3>
-        <p>斜顶箱勾了「可倒放」后会尝试一正一倒成对叠放：两只拼成高度 = H低+H高 的实心块，每对省 H高−H低。
-          勾「允许跨 SKU 填缝」后，层内剩下的窄条缝会用别的小箱补满（箱数只会不变或变多）。
-          L 形箱的台阶缺口无法用另一只 L 箱填满（会互相穿插），只能靠别的小箱填。</p>
-      </div>
-      <div class="help-item">
-        <h3>不会悬空</h3>
-        <p>每箱下方必须有完整的支撑面（顶面高度与它底面相同的箱子完全覆盖它的底面），否则不摆；最底层由柜底支撑。
-          这条会跳过一些「看起来能放其实悬空」的位置，装得少一点，但装柜单能照着装。</p>
-      </div>
-      <div class="help-item">
-        <h3>箱子比门高就进不去</h3>
-        <p>箱体必须先过柜门。40HQ 内高 2698mm、门高只有 2585mm，2600mm 的箱子里头放得下也进不了门，
-          程序按门高拦截并写明具体数值。内高和门高都可以在规格里改。</p>
-      </div>
-      <div class="help-item">
-        <h3>结果怎么读</h3>
-        <p>体积装载率 = 已装箱净体积 ÷ 柜内容积；分层明细一层一个箱型，层高累加不超过内高；
-          装不完时会给出剩余箱数、原因，以及同规格柜还需要几个。</p>
-      </div>
-      <div class="help-item">
-        <h3>3D 图里那点缝隙</h3>
-        <p>每箱渲染时缩了 4mm 以便看清是哪一箱，<b>只是视觉效果，不代表真实余量</b>；
-          排布位置仍按外接长方体紧贴计算。箱体描边是一个整体几何，不会拖慢交互。</p>
-      </div>
-      <div class="help-item">
-        <h3>为什么有空间却装不进去</h3>
-        <p>装载率下面有一栏「为什么停」，把剩余空间拆成<b>可承重</b>和<b>不可承重</b>：
-          斜面（斜顶箱单只，放上去就塌）、顶面零碎（顶面高低不齐，一整只箱跨不过去）、高度不足（层数取整）。
-          每条阻塞原因后面会给能解锁的开关和能到多少箱。</p>
-      </div>
-      <div class="help-item">
-        <h3>同款箱换姿态填条带</h3>
-        <p>主姿态铺满后剩下的窄带，会先用<b>同款箱的其它姿态</b>（转 90°、侧放）去塞，
-          塞不下的才交给别的箱型；分层明细里「主姿态 / 换姿态填条带」分开列。
-          条带里的箱子可以比本层高（那一片上面不再叠层），但仍须下方有完整支撑。</p>
-      </div>
-      <div class="help-item">
-        <h3>默认不限方向，限制由你按 SKU 定</h3>
-        <p>现实里纸箱可以任意方向摆，所以默认「允许侧放 / 允许倒放」都是勾上的，系统按几何判断哪些面真能放平：
-          矩形 6 个面、斜顶 5 个（斜面朝下放不住）、L 形 5 个（台阶面朝下放不住）。
-          <b>有「此面向上」标识、易碎必须立放的货，在那一行取消勾选</b>，没勾的姿态不会出现在任何方案里。</p>
-        <p>侧放、倒扣之后的承重面按<b>真实接触面</b>算（斜面、台阶竖面不承重），不会因为外接体看着平就让你叠上去。</p>
-        <p>斜顶箱 / L 形箱的倒放只用于「一正一倒对扣」的上件——它们单独倒过来没有水平底面，落地就是斜面或台阶。</p>
-      </div>
-      <div class="help-item">
-        <h3>装不下时看「所需柜数」</h3>
-        <p>装不完时，结果页会按同规格柜重算剩余货物还需要几个柜，并列出每柜装多少箱；
-          超过门高或底面超尺寸的箱子换柜也装不进，会单独列出来说明要改箱型。</p>
-      </div>
-      <div class="help-item">
-        <h3>结果页最下面的「本单体检」</h3>
-        <p>四项：越界箱数、两两重叠、悬空 / 压斜面、渲染与占位的最大偏差，<b>都应该是 0</b>。
-          不是 0 时会写明第几层哪一箱、哪个坐标差多少——把那一栏截图发过来就能直接定位，
-          不用再复述参数。</p>
-      </div>
-      </div>
-    </details>
-    <details class="help-seg">
-      <summary>已知限制</summary>
-      <ul class="help-limits">
-        <li>一层一个主箱型，层内余缝才跨 SKU 填；不做三维任意摆放。</li>
-        <li>L 形台阶缺口只能靠别的箱子或垫块填，同款 L 互相填会穿插（几何上无解）。</li>
-        <li>载重要靠单箱重量，没填重量只能算体积，载重界记为「未约束」。</li>
-        <li>上界是放宽后的估计：差距为 0 才标「已证明最优」，否则「差距 N 箱（受放宽影响）」。</li>
-        <li>侧躺互补块已评估未做：密度 0.1114 低于竖直对扣 0.1133，见 RELEASE.md。</li>
-      </ul>
-    </details>
-    </div>
-  </section>
-
-  <footer class="foot">
-    <span>装柜计算器 · M4 导出与补柜</span>
-    <span>内部计算一律毫米；显示时换算为米 / 立方米。</span>
-  </footer>
 </div>
-
+<div id="hud-right">
+  <div style="font-size:13px">
+    柜型 <select id="ctn">
+      <option>20GP</option><option>40GP</option><option>40HQ</option><option>45HQ</option>
+    </select>
+  </div>
+  <div id="dims" style="color:#94a3b8;margin-top:4px;font-size:12px;text-align:right"></div>
+</div>
+<div id="tools">
+  <button id="rx">绕 X</button> <button id="ry">绕 Y</button> <button id="rz">绕 Z</button>
+  <button id="cp">复制</button> <button id="un">撤销</button>
+  <button id="pair">对扣</button>
+  <button id="smart" style="background:#0e7490;border-color:#0891b2;font-weight:600">智能计算</button>
+</div>
+<div id="side">
+  <h3>纸箱清单</h3>
+  <div id="empty">还没有箱型，点下面「＋ 新建箱型」。</div>
+  <div id="sku-list"></div>
+  <button class="btn" id="new-sku" style="width:100%">＋ 新建箱型</button>
+  <div id="form">
+    <div id="shapes">
+      <button type="button" data-shape="rect">矩形箱</button>
+      <button type="button" data-shape="lshape">L 形箱</button>
+      <button type="button" data-shape="slope">斜顶箱</button>
+    </div>
+    <div class="fld"><label>名称</label><input id="f-name" placeholder="例如 吧椅 / 茶几"></div>
+    <div id="fields"></div>
+    <div class="fld"><label>数量</label><input id="f-qty" value="10" inputmode="numeric"></div>
+    <div class="err" id="f-err"></div>
+    <div class="fld" style="gap:8px">
+      <button class="btn" id="f-save" style="flex:1">保存</button>
+      <button class="btn ghost" id="f-cancel" style="flex:1">取消</button>
+    </div>
+  </div>
+</div>
+<div id="status">状态：待拖动</div>
+<div id="stat2" style="display:none"></div>
+<script>
+  // 错误兜底：页面出任何错都写到状态栏，截图就能看到原因
+  window.__errs = [];
+  function showErr(msg) {
+    window.__errs.push(msg);
+    var el = document.getElementById('status');
+    if (el) { el.textContent = '脚本错误：' + msg; el.className = 'bad'; }
+    var s2 = document.getElementById('stat2');
+    if (s2) s2.textContent = '脚本错误：' + msg;
+  }
+  window.onerror = function (m, src, line, col) { showErr(m + ' @' + (src || '') + ':' + line + ':' + col); };
+  window.addEventListener('unhandledrejection', function (e) {
+    showErr((e.reason && (e.reason.message || e.reason)) || 'unknown rejection');
+  });
+</script>
 <script src="js/core/shapes.js"></script>
 <script src="js/core/containers.js"></script>
-<script src="js/core/validate.js"></script>
 <script src="js/core/solid.js"></script>
 <script src="js/core/pack.js"></script>
-<script src="js/core/layerdp.js"></script>
-<script src="js/core/explain.js"></script>
-<script src="js/core/report.js"></script>
-<script src="js/core/storage.js"></script>
-<script src="js/ui/container-panel.js"></script>
-<script src="js/ui/sku-rows.js"></script>
-<script src="js/ui/result.js"></script>
-<script src="js/ui/health.js"></script>
-<script src="js/ui/diag.js"></script>
-<script src="js/ui/export-csv.js"></script>
-<script src="js/ui/help.js"></script>
-<script src="js/app.js"></script>
-<script type="module" src="js/ui/viewer.js"></script>
+<script src="js/core/manual.js"></script>
+<script src="js/core/corner-link.js"></script>
+<script src="js/core/manual-model.js"></script>
+<script type="module">
+import * as THREE from './vendor/three.module.min.js';
+import { geometryFor, poseMatrix3, matrix4FromR3 } from './js/ui/box-geometry.js';
+
+// 柜型切换：换柜型直接带参数重载，线框 / 相机取景 / 射线平面 / 标注一起重建，
+// 不留半新半旧的场景状态。柜型确定 = 尺寸确定，本来就该整场重建。
+const ctnKey = new URLSearchParams(location.search).get('container') || '40HQ';
+const ctnSel = document.getElementById('ctn');
+if (ctnSel) {
+  ctnSel.value = ctnKey;
+  // 切柜型：只重建渲染对象（线框/地面/相机/标注），数据模型原地保留，
+  // 已摆的箱子一个都不丢；重建后重新校验，越界的标红。
+  ctnSel.addEventListener('change', () => {
+    c = CL.containers.get(ctnSel.value);
+    model.container = c;
+    paintDims();
+    rebuildScene();
+    revalidate();
+    selected = null;
+    refreshAll();
+    say('已切到 ' + ctnSel.value + '：' + c.innerL + '×' + c.innerW + '×' + c.innerH);
+  });
+}
+let c = CL.containers.get(ctnKey);
+function paintDims() {
+  document.getElementById('dims').textContent =
+    '内长 ' + c.innerL + ' × 内宽 ' + c.innerW + ' × 内高 ' + c.innerH + ' · 门高 ' + c.doorH;
+}
+paintDims();
+const statusEl = document.getElementById('status');
+const say = (msg, bad) => {
+  statusEl.textContent = '状态：' + msg;
+  statusEl.className = bad ? 'bad' : '';
+};
+
+// ---- 场景 ----
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 10, 80000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+let L = c.innerL, H = c.innerH, W = c.innerW;
+const toScene = (x, y, z) => new THREE.Vector3(x - L / 2, y, z - W / 2);
+
+// 柜体线框 + 地平面放在一个组里，切柜型时整组重建
+const world = new THREE.Group();
+scene.add(world);
+let floor = null;
+let wireMat = null;
+function rebuildScene() {
+  while (world.children.length) {
+    const o = world.children.pop();
+    if (o.geometry) o.geometry.dispose();
+  }
+  L = c.innerL; H = c.innerH; W = c.innerW;
+  // 柜体轮廓线单独留一份材质：拖动时把它调淡，免得线条穿过纸箱干扰判断
+  wireMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.85 });
+  world.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(L, H, W)),
+    wireMat
+  ).translateY(H / 2));
+  floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(L, W),
+    new THREE.MeshBasicMaterial({ color: 0x1e293b, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, 0, 0);
+  floor.name = 'floor';
+  world.add(floor);
+  // 相机按新内腔重新取景
+  camera.position.set(L * 0.85, H * 2.6, W * 3.2);
+  camera.lookAt(0, H / 2, 0);
+}
+rebuildScene();
+
+// 模型从空箱型开始，箱型一律由左栏新建；这里的网格只是模型的投影
+const model = CL.manualModel.create([], c);
+const itemsById = model.itemsById;
+
+// 三种箱型的几何共用 js/ui/box-geometry.js，和正式页同一份代码
+const geoCache = new Map();
+function geoFor(skuId, pose) {
+  const key = skuId + '|' + (pose ? pose.join(',') : '');
+  if (!geoCache.has(key)) {
+    const it = itemsById[skuId];
+    const g = geometryFor(it);
+    if (pose) g.applyMatrix4(matrix4FromR3(poseMatrix3(pose)));
+    geoCache.set(key, g);
+  }
+  return geoCache.get(key);
+}
+const PALETTE = ['#2563eb', '#0d9488', '#d97706', '#7c3aed', '#db2777', '#65a30d', '#0891b2', '#b45309', '#4f46e5', '#be123c'];
+function colorFor(skuId) {
+  const it = itemsById[skuId];
+  const i = it && typeof it.index === 'number' ? it.index : 0;
+  return new THREE.Color(PALETTE[i % PALETTE.length]);
+}
+const skuMats = new Map();
+function matFor(skuId) {
+  if (!skuMats.has(skuId)) skuMats.set(skuId, new THREE.MeshLambertMaterial({ color: colorFor(skuId), transparent: true, opacity: 0.92 }));
+  return skuMats.get(skuId);
+}
+const ghostMat = new THREE.MeshLambertMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.55 });
+// 拖动预览的颜色：蓝=随便落、青=已吸到支撑面并贴边、绿=已咬住自动对扣位
+const ghostFaceMat = new THREE.MeshLambertMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.6 });
+const ghostPairMat = new THREE.MeshLambertMaterial({ color: 0x22c55e, transparent: true, opacity: 0.65 });
+const SELECT_MAT = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
+const BAD_MAT = new THREE.MeshLambertMaterial({ color: 0xdc2626 });
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.1));
+
+function meshFor(b) {
+  const m = new THREE.Mesh(geoFor(b.skuId, b.pose), matFor(b.skuId));
+
+  m.userData.uid = b.uid;
+  m.position.copy(toScene(b.x + b.l / 2, b.z + b.h / 2, b.y + b.w / 2));
+  return m;
+}
+const meshes = new Map();
+function syncMesh(b) {
+  let m = meshes.get(b.uid);
+  if (!m) { m = meshFor(b); meshes.set(b.uid, m); scene.add(m); }
+  // 旋转会换姿态矩阵，几何必须跟着换；只改位置会让箱子“看着没转”
+  m.geometry = geoFor(b.skuId, b.pose);
+  m.position.copy(toScene(b.x + b.l / 2, b.z + b.h / 2, b.y + b.w / 2));
+  return m;
+}
+
+// 相机：斜上方看整柜
+camera.position.set(L * 0.85, H * 2.6, W * 3.2);
+camera.lookAt(0, H / 2, 0);
+
+// ---- 拖放 ----
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const dragPlaneHits = [];
+let dragging = null;   // { uid, mesh, start, planeY, snapped }
+let dragPlane = null;  // 固定高度的拖拽平面（three 的 Y 是高度）
+let dragOffset = null; // 抓取点相对箱心的水平偏移，避免一按下箱子就跳到鼠标下
+let ghostPos = null;
+
+function setPointer(ev) {
+  pointer.x = (ev.clientX / innerWidth) * 2 - 1;
+  pointer.y = -(ev.clientY / innerHeight) * 2 + 1;
+}
+
+function groundHit() {
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects([floor, ...meshes.values()], false);
+  return hits.length ? hits[0].point : null;
+}
+
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  setPointer(ev);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects([...meshes.values()], false);
+  if (!hits.length) return;
+  const uid = hits[0].object.userData.uid;
+  const b = model.boxes.find((x) => x.uid === uid);
+  // 固定高度的拖拽平面：不管鼠标划过地板、箱顶还是箱侧，箱子都只在同一水平面上跟手走。
+  // 之前按“射线打到哪个面”来定位，划过别的箱子就会跳高度，这是难控制的根因。
+  const planeY = b.z + b.h / 2;
+  dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
+  const hitPoint = new THREE.Vector3();
+  raycaster.ray.intersectPlane(dragPlane, hitPoint);
+  dragOffset = new THREE.Vector3(
+    hits[0].object.position.x - hitPoint.x, 0, hits[0].object.position.z - hitPoint.z
+  );
+  // 每像素多少毫米：按住 Shift 上下拖时用它把鼠标位移换算成高度
+  const camDist = Math.abs(camera.position.y - planeY);
+  const worldH = 2 * camDist * Math.tan((camera.fov * Math.PI / 180) / 2);
+  dragging = {
+    uid, mesh: hits[0].object, start: b, planeY,
+    downX: ev.clientX, downY: ev.clientY, zOff: null,
+    mmPerPx: (worldH / innerHeight) || 5
+  };
+  if (wireMat) wireMat.opacity = 0.22;      // 拖动时把柜体轮廓调淡，别挡视线
+  hits[0].object.material = ghostMat;
+  renderer.domElement.setPointerCapture(ev.pointerId);
+  say('拖动：直接拖=水平移动；按住 Shift=左右上下一起动（自由拖动）');
+});
+
+function containerXY(mesh, b) {
+  return { x: mesh.position.x + L / 2 - b.l / 2, y: mesh.position.z + W / 2 - b.w / 2 };
+}
+const SNAP_TOL = 160;   // 吸附容差：越大越“粘”。现场堆箱是靠近就对齐，160mm 才有明显的磁吸感
+const PAIR_TOL = 400;   // 自动对扣的吸引距离：同款 L 形/斜顶在这个范围内就咬住
+
+/** 找出脚下能托住 (l×w) 的最高支撑高度：把同一高度的所有支撑面并起来看（两只箱拼着也能托住） */
+function supportRectUnder(placed, h, x, y, l, w) {
+  const byZ = new Map();
+  placed.forEach((p) => {
+    const it = itemsById[p.skuId];
+    if (!it || !CL.pack.surfacesOf) return;
+    CL.pack.surfacesOf(it, p).forEach((s) => {
+      const key = Math.round(s.z * 1000) / 1000;
+      if (!byZ.has(key)) byZ.set(key, []);
+      byZ.get(key).push(s.rect);
+    });
+  });
+  const zs = Array.from(byZ.keys()).filter((z) => z + h <= c.innerH + 1e-6).sort((a, b) => b - a);
+  for (const z of zs) {
+    const rects = byZ.get(z);
+    // 这一高度的支撑面并集的外接框：箱子贴进去，尽量落在支撑上
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    rects.forEach((r) => {
+      const ix = Math.min(x + l, r.x + r.l) - Math.max(x, r.x);
+      const iy = Math.min(y + w, r.y + r.w) - Math.max(y, r.y);
+      if (ix <= 0 || iy <= 0) return;
+      x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y);
+      x1 = Math.max(x1, r.x + r.l); y1 = Math.max(y1, r.y + r.w);
+    });
+    if (x0 === Infinity) continue;
+    const coverW = Math.min(x + l, x1) - Math.max(x, x0);
+    const coverH = Math.min(y + w, y1) - Math.max(y, y0);
+    if (coverW <= 0 || coverH <= 0) continue;
+    return { z, rect: { x: x0, y: y0, l: x1 - x0, w: y1 - y0 } };
+  }
+  return null;
+}
+
+/** 把箱子夹在柜内（拖拽过程中永远不越界），再吸附，最后把网格摆到结果位置 */
+function placeGhost(ev) {
+  setPointer(ev);
+  raycaster.setFromCamera(pointer, camera);
+  const b = dragging.start;
+  const halfL = b.l / 2, halfW = b.w / 2;
+  // 鼠标正下方命中了什么（一次射线，后面水平位置和高度都用它）
+  const hoverHits = raycaster.intersectObjects(
+    [floor].concat(Array.from(meshes.values()).filter((m) => m.userData.uid !== dragging.uid)), false);
+  let bx, by;
+  if (dragging.verticalOnly && dragging.lastBX !== undefined) {
+    // 按住 Shift 只在竖直方向调整：水平位置锁住不动，免得一动鼠标箱子就横向漂
+    bx = dragging.lastBX; by = dragging.lastBY;
+  } else {
+    // 水平位置优先跟着鼠标命中的那个面走：这样把箱子拖到高箱顶上时，
+    // 它落点就在高箱顶上。误差靠平滑（lerp）消化，不会一换面就跳。
+    // 鼠标没压到任何面（指到柜外）时，退回"箱子自己那一层高度"的平面。
+    let tx, ty;
+    if (hoverHits.length) {
+      const hp = hoverHits[0].point;
+      tx = hp.x + dragOffset.x + L / 2 - halfL;
+      ty = hp.z + dragOffset.z + W / 2 - halfW;
+    } else {
+      const p = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(dragPlane, p)) return;
+      tx = p.x + dragOffset.x + L / 2 - halfL;
+      ty = p.z + dragOffset.z + W / 2 - halfW;
+    }
+    // 位置就是鼠标算出来的那个，不做插值：松手才准。
+    // 之前 0.4 的平滑会让箱子永远落后鼠标一点，松手时落点偏开目标箱，
+    // 表现成"有时能叠、有时叠不上"。
+    bx = Math.min(Math.max(tx, 0), L - b.l);
+    by = Math.min(Math.max(ty, 0), W - b.w);
+    dragging.lastBX = bx; dragging.lastBY = by;
+  }
+  const cand = Object.assign({}, b, { x: bx, y: by });
+  const others = model.boxes.filter((o) => o.uid !== dragging.uid);
+  // 按住 Shift：箱子直接浮在 zOff 高度，跟着鼠标上下动。
+  // 之前是"只能落到已有的面上"，没有面可落时箱子纹丝不动，看起来像没反应。
+  if (dragging.airborne) {
+    // 自由拖动：按鼠标算出来的三维位置直接摆，不再贴面
+    const fb = dragging.freeBox;
+    const z = Math.max(0, Math.min(c.innerH - b.h, fb ? fb.z : (dragging.zOff === null ? b.z : dragging.zOff)));
+    const air = Object.assign({}, b, { x: fb ? fb.x : bx, y: fb ? fb.y : by, z });
+    dragging.preview = { box: air, kind: 'air' };
+    dragging.previewKind = 'air';
+    dragging.snapped = air;
+    dragging.mesh.material = ghostMat;
+    dragging.mesh.position.set(air.x + halfL - L / 2, z + b.h / 2, air.y + halfW - W / 2);
+    return;
+  }
+  const sn = CL.manual.snap(cand, others, c, 0);   // 只夹进柜内，贴边交给下面的逐轴对齐
+  let sx = Math.min(Math.max(sn.box.x, 0), L - b.l);
+  let sy = Math.min(Math.max(sn.box.y, 0), W - b.w);
+
+  // 高度上限：鼠标压到哪只箱子，就用它整只箱子的顶面高度（压到侧面也算它顶上）。
+  // 用命中点的 y 会"压在侧面就只到半高"，于是同样瞄一个箱子，一会儿能叠一会儿不行。
+  let hoverZ = 0;
+  if (hoverHits.length) {
+    const ho = hoverHits[0].object;
+    if (ho === floor) {
+      hoverZ = 0;
+    } else {
+      const hb = model.boxes.find((x) => x.uid === ho.userData.uid);
+      hoverZ = hb ? hb.z + hb.h : Math.max(0, hoverHits[0].point.y);
+    }
+  }
+  dragging.hoverZ = hoverZ;
+
+  // 拖动过程中就用松手时同一套算法算落点：所见即所得。
+  //   1) 同款 L 形/斜顶在 400mm 内 → 预览"翻过来扣上"的位置（带滞后，临界点上不来回抖）
+  //   2) 否则 → 预览"坐到支撑面 + 逐轴贴边"的位置
+  const probe = Object.assign({}, b, { x: sx, y: sy, z: b.z, uid: dragging.uid });
+  let preview = null;
+  // 只排除"自己那个配对伙伴"：否则把下面那只拖起来时会去扣上面那只，看起来就是两只交换位置。
+  // 别的箱子一律允许扣（不再因为"配过对"就整只被排除）。
+  const pairExclude = [];
+  if (dragging.start.pairedWith) pairExclude.push(dragging.start.pairedWith);
+  others.forEach((o) => { if (o.pairedWith === dragging.uid) pairExclude.push(o.uid); });
+  const ap = CL.cornerLink.autoPairOnDrop(probe, others, c, itemsById, { tol: PAIR_TOL, exclude: pairExclude });
+  if (!ap.ok && ap.reason === 'asymmetric' && !dragging.asymWarned) {
+    dragging.asymWarned = true;
+    say(ap.message, true);          // 台阶不对称：说清楚为什么扣不上，别让人以为程序坏了
+  }
+  if (ap.ok) {
+    preview = { box: ap.box, kind: 'pair', pairedWith: ap.pairedWith, dist: ap.dist, res: ap.residual };
+    dragging.pairLock = { x: ap.box.x, y: ap.box.y, to: ap.pairedWith };
+  } else if (dragging.pairLock) {
+    // 滞后：已经咬住的扣位，得拖出 1.6 倍容差才松开，否则在边界上会闪
+    const d = Math.hypot(probe.x - dragging.pairLock.x, probe.y - dragging.pairLock.y);
+    const lockBox = others.find((o) => o.uid === dragging.pairLock.to);
+    const ph = lockBox && CL.cornerLink.pairPlacement(lockBox, itemsById[b.skuId]);
+    if (d <= PAIR_TOL * 1.6 && ph) {
+      const locked = Object.assign({}, b, ph);
+      preview = {
+        box: locked, kind: 'pair', pairedWith: lockBox.uid, dist: Math.round(d * 10) / 10,
+        res: {
+          dx: Math.round((locked.x - lockBox.x) * 10) / 10,
+          dy: Math.round((locked.y - lockBox.y) * 10) / 10,
+          dz: Math.round((locked.z - lockBox.z - itemsById[b.skuId].shapeValues.hlow) * 10) / 10
+        }
+      };
+    } else {
+      dragging.pairLock = null;
+    }
+  }
+  if (!preview) {
+    // 高度上限只由滚轮决定（默认不限）：落在"脚下最高的那层"。
+    // 之前用"鼠标压到的那个面"当上限，结果同一只箱子左边能叠、右边不能叠——
+    // 因为射线有没有打到那个箱顶取决于视角和遮挡，不该影响能不能叠。
+    const cap = dragging.zOff === null ? Infinity : dragging.zOff;
+    let pf = CL.cornerLink.placeOnFace(
+      Object.assign({}, b, { x: sx, y: sy, z: c.innerH, uid: dragging.uid }), others, c, itemsById,
+      { tol: 150, maxZ: cap });
+    if (!pf.ok) {
+      // 命中面的位置不行（视差/遮挡导致偏了一点），再试"箱子自己那一层"的平面位置
+      const p2 = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(dragPlane, p2)) {
+        const sx2 = Math.min(Math.max(p2.x + dragOffset.x + L / 2 - halfL, 0), L - b.l);
+        const sy2 = Math.min(Math.max(p2.z + dragOffset.z + W / 2 - halfW, 0), W - b.w);
+        const pf2 = CL.cornerLink.placeOnFace(
+          Object.assign({}, b, { x: sx2, y: sy2, z: c.innerH, uid: dragging.uid }), others, c, itemsById,
+          { tol: 150, maxZ: cap });
+        if (pf2.ok) { pf = pf2; sx = sx2; sy = sy2; }
+      }
+    }
+    if (pf.ok) preview = { box: pf.box, kind: 'face', info: pf };
+    else dragging.previewFail = pf.message;
+  }
+  if (!preview) {
+    // 什么也贴不上（被挡住/出柜）：保持原高度原位置，松手会报原因
+    const st = CL.manual.settle(Object.assign({}, b, { x: sx, y: sy, z: c.innerH }), others, c, itemsById);
+    dragging.preview = null;
+    dragging.previewKind = 'raw';
+    dragging.snapped = Object.assign({}, b, { x: sx, y: sy, z: st.ok ? st.z : b.z });
+    dragging.mesh.material = ghostMat;
+    dragging.mesh.position.set(sx + halfL - L / 2, dragging.snapped.z + b.h / 2, sy + halfW - W / 2);
+    return;
+  }
+  dragging.preview = preview;
+  dragging.previewKind = preview.kind;
+  dragging.snapped = preview.box;
+  dragging.mesh.material = preview.kind === 'pair' ? ghostPairMat : ghostFaceMat;
+  dragging.mesh.position.set(
+    preview.box.x + halfL - L / 2,
+    preview.box.z + b.h / 2,
+    preview.box.y + halfW - W / 2
+  );
+}
+
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  if (!dragging) return;
+  // 拖动阈值：手指/鼠标抖几个像素不算拖动，否则"点一下选中"会顺手把箱子挪位
+  if (!dragging.moved) {
+    const d = Math.hypot(ev.clientX - dragging.downX, ev.clientY - dragging.downY);
+    if (d < 4) return;
+  }
+  dragging.moved = true;
+  dragging.lastX = ev.clientX;
+  dragging.lastY = ev.clientY;
+  // 按住 Shift：进入"自由 3D 拖动"——箱子跟着鼠标在屏幕平面里同时左右上下走。
+  // 之前两种模式一个锁高度、一个锁水平，想同时挪就得来回切换，所以总觉得拖不到位。
+  if (ev.shiftKey) {
+    const halfL0 = dragging.start.l / 2, halfW0 = dragging.start.w / 2;
+    const cur = dragging.freeBox || dragging.snapped || dragging.start;
+    const curCenter = new THREE.Vector3(
+      cur.x + halfL0 - L / 2,
+      cur.z + dragging.start.h / 2,
+      cur.y + halfW0 - W / 2
+    );
+    if (!dragging.free) {
+      const n = new THREE.Vector3();
+      camera.getWorldDirection(n);
+      dragging.freePlane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, curCenter);
+      const h0 = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(dragging.freePlane, h0)) return;
+      dragging.freeOffset = curCenter.clone().sub(h0);   // 抓取偏移，避免一按 Shift 就跳
+      dragging.free = true;
+      say('自由拖动：左右移动 + 上下升降同时生效，松手落到下方平面');
+    }
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(dragging.freePlane, hit)) return;
+    const ctr = hit.add(dragging.freeOffset);
+    const nx = ctr.x + L / 2 - halfL0;
+    const ny = ctr.z + W / 2 - halfW0;
+    const nz = ctr.y - dragging.start.h / 2;
+    dragging.freeBox = {
+      x: Math.max(0, Math.min(L - dragging.start.l, nx)),
+      y: Math.max(0, Math.min(W - dragging.start.w, ny)),
+      z: Math.max(0, Math.min(c.innerH - dragging.start.h, nz))
+    };
+    dragging.zOff = dragging.freeBox.z;
+    dragging.verticalOnly = true;
+    dragging.airborne = true;
+    placeGhost(ev);
+    say('自由拖动中：x ' + Math.round(dragging.freeBox.x) + ' / y ' + Math.round(dragging.freeBox.y) +
+      ' / z ' + Math.round(dragging.freeBox.z) + '（松手落到下方平面）');
+    return;
+  }
+  dragging.free = false;
+  dragging.freeBox = null;
+  dragging.verticalOnly = false;
+  dragging.airborne = false;
+  dragging.lastShiftY = undefined;
+  placeGhost(ev);
+});
+
+// 拖动中滚轮调"允许落到的高度"：想塞进堆垛下面就把高度压下来，
+// 否则落位永远吸到脚边最高的那一层，塞不进去。
+renderer.domElement.addEventListener('wheel', (ev) => {
+  if (!dragging) return;
+  ev.preventDefault();
+  const step = ev.shiftKey ? 10 : 50;
+  const hi = Math.max(0, c.innerH - dragging.start.h);
+  // 第一次滚轮从"当前预览到的高度"起算，滚一格才不会跳
+  if (dragging.zOff === null) {
+    dragging.zOff = (dragging.snapped && dragging.snapped.z !== undefined) ? dragging.snapped.z : dragging.start.z;
+  }
+  const next = dragging.zOff + (ev.deltaY > 0 ? -step : step);
+  dragging.zOff = Math.max(0, Math.min(hi, next));
+  dragging.moved = true;
+  if (dragging.lastX !== undefined) {
+    placeGhost({ clientX: dragging.lastX, clientY: dragging.lastY });
+  }
+  say('落点高度上限 z=' + Math.round(dragging.zOff) + 'mm（滚轮向上抬 / 向下压，Shift 精细 10mm）');
+}, { passive: false });
+
+renderer.domElement.addEventListener('pointerup', (ev) => {
+  if (!dragging) return;
+  const { uid, mesh, start } = dragging;
+  let pv = dragging.preview;           // 拖动中实时算好的落点：所见即所得
+  const failMsg = dragging.previewFail;
+  const moved = dragging.moved === true;   // 只是点一下（没拖动）就别动它
+  dragging = null;
+  if (wireMat) wireMat.opacity = 0.85;      // 松手恢复柜体轮廓
+  mesh.material = matFor(start.skuId);
+  if (!moved) return;                      // 单击只负责选中，不动箱子
+  // 按住 Shift 摆出来的高度是"浮空预览"：松手时从那个高度落到下方能托住的面
+  let finalPv = pv;
+  if (pv && pv.kind === 'air') {
+    const others = model.boxes.filter((b) => b.uid !== uid);
+    const pf = CL.cornerLink.placeOnFace(
+      Object.assign({}, pv.box, { z: c.innerH, uid }), others, c, itemsById,
+      { tol: 150, maxZ: pv.box.z });
+    if (!pf.ok) {
+      syncMesh(start);
+      say('放不下：' + pf.message, true);
+      return;
+    }
+    finalPv = { box: pf.box, kind: 'face', info: pf };
+  }
+  if (!finalPv) {
+    syncMesh(start);
+    say('放不下：' + (failMsg || '这个位置没有可落的面'), true);
+    return;
+  }
+  pv = finalPv;
+  if (pv.kind === 'pair') {
+    model.boxes = model.boxes.map((b) => (b.uid === uid
+      ? Object.assign({}, pv.box, { uid, pinned: true, pairedWith: pv.pairedWith })
+      : (b.uid === pv.pairedWith ? Object.assign({}, b, { paired: true }) : b)));
+    selected = uid;
+    refreshAll();
+    say('已自动对扣：#' + uid + ' 翻过来扣在 #' + pv.pairedWith + ' 上（水平 ' + pv.dist +
+      'mm 内咬住）｜角对齐 ' + pv.res.dx + ' / ' + pv.res.dy + ' / ' + pv.res.dz +
+      'mm｜落点 z=' + Math.round(pv.box.z) + '｜与其它箱侵入 0mm');
+    return;
+  }
+  const info = pv.info || {};
+  // 普通落位：把这只箱子（和它的配对伙伴）从配对关系里一起摘出来。
+  // 只解自己是不够的——伙伴如果还是 pinned，就会永远悬在原地，拖不动也落不下来。
+  model.boxes = model.boxes.map((b) => {
+    if (b.uid === uid) return Object.assign({}, pv.box, { uid, pinned: false, pairedWith: undefined });
+    if (start.pairedWith && b.uid === start.pairedWith) {
+      return Object.assign({}, b, { paired: false, pinned: false });   // 它原来的下件：解除配对，正常受重力
+    }
+    if (b.pairedWith === uid) {
+      return Object.assign({}, b, { paired: false, pinned: false, pairedWith: undefined }); // 原来扣在它上面的那只
+    }
+    return b;
+  });
+  selected = uid;
+  refreshAll();
+  say('已落位：' + (info.floor ? '柜底' : '下层箱面 z=' + Math.round(info.supportZ)) +
+    '｜面接触 ' + Math.round((info.contact ? info.contact.ratio : 1) * 100) + '%' +
+    '（' + (info.contact ? info.contact.area : Math.round(pv.box.l * pv.box.w)) + 'mm²）' +
+    '｜缝 ' + (info.gap === undefined ? 0 : info.gap) + 'mm' +
+    (info.aligned && info.aligned.moved
+      ? '｜贴边 Δx ' + info.aligned.dx + ' Δy ' + info.aligned.dy + 'mm（' + (info.aligned.x || '—') + ' / ' + (info.aligned.y || '—') + '）'
+      : '｜已贴齐') +
+    '｜与其它箱侵入 0mm');
+});
+
+function tick() {
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+// 第一帧必须等模块整个跑完：tick() 里要用手柄相关的 const，直接同步调用会踩暂时性死区
+requestAnimationFrame(tick);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// 便于自检：直接把一只箱子喂进去
+const stats = () => ({
+  children: scene.children.length,
+  calls: renderer.info.render.calls,
+  camera: camera.position.toArray().map((v) => Math.round(v)),
+  boxes: model.boxes.length,
+  errs: window.__errs.slice()
+});
+window.__PROTO = {
+  model,
+  debug: { renderer, scene, camera, stats },
+  drop(skuId, x, y, z) {
+    const it = itemsById[skuId];
+    const b = { skuId, x, y, z, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h };
+    const res = CL.manual.tryPlace(b, model.boxes, c, itemsById);
+    if (res.ok) {
+      res.box.uid = model.nextId++;
+      model.boxes.push(res.box);
+      syncMesh(res.box);
+    }
+    return { ok: res.ok, reason: res.reason, box: res.box, boxCount: model.boxes.length };
+  }
+};
+// 自检全部跑在**临时模型**上，不污染用户正在摆的柜子
+function tmpModel() {
+  const tmp = CL.manualModel.create([], c);
+  const it = toItem('t1', 'rect', '自检箱', { L: '400', W: '300', H: '300' }, 99);
+  tmp.items.push(it);
+  tmp.itemsById[it.id] = it;
+  return tmp;
+}
+
+// 两条验收自检：撞墙必须拒绝并给原因；落在箱顶高度必须等于 300
+window.__PROTO.selfTest = function () {
+  const out = {};
+  const tmp = tmpModel();
+  const base = { skuId: 't1', x: 0, y: 0, z: 0, l: 400, w: 300, h: 300 };
+  const first = CL.manual.tryPlace(base, tmp.boxes, c, tmp.itemsById);
+  if (first.ok) tmp.boxes.push(first.box);
+  const wall = CL.manual.tryPlace({ skuId: 't1', x: 0, y: c.innerW - 100, z: 0, l: 400, w: 300, h: 300 }, tmp.boxes, c, tmp.itemsById);
+  out.wallRejected = wall.ok === false && wall.reason === 'bounds';
+  out.wallReason = wall.reason || 'ok';
+  out.modelUnchanged = tmp.boxes.length === 1;
+  const top = CL.manual.tryPlace({ skuId: 't1', x: 0, y: 0, z: 2000, l: 400, w: 300, h: 300 }, tmp.boxes, c, tmp.itemsById);
+  out.onTopOk = !!top.ok;
+  out.onTopZ = top.ok ? Math.round(top.box.z) : null;
+  return out;
+};
+
+// ---- Step 2：选中 / 旋转 / 复制 / 撤销 / 计数 ----
+let selected = null;
+let skipSettle = false;   // 智能计算铺完结果后，跳过下一次重力重排
+const SELECT_COLOR = 0xf59e0b;
+const BASE_COLOR = 0x2563eb;
+
+function paintSelection() {
+  meshes.forEach((m, uid) => {
+    if (uid === selected) { m.material = SELECT_MAT; return; }
+    const b = model.boxes.find((x) => x.uid === uid);
+    m.material = b && b.invalid ? BAD_MAT : matFor(b ? b.skuId : 'x');
+  });
+}
+
+// 版本标记：只在控制台打印，不占界面。排查缓存时在控制台看这一行即可
+const BUILD = '2026-11-04 08:40';
+console.info('[manual-proto] build ' + BUILD);
+
+/** 重力结算：自下而上让每只箱子重新落到它当下的支撑面上。
+ *  拖走下面那只、删掉一只、转完姿态之后都要跑，否则上面的箱子会悬在空中——违反常识。 */
+function resettleAll() {
+  const sorted = model.boxes.slice().sort((a, b) => a.z - b.z);
+  const done = [];
+  sorted.forEach((b) => {
+    if (b.pinned) { done.push(b); return; }   // 对扣上件：位置由对扣决定，不能重算
+    const st = CL.manual.settle(Object.assign({}, b, { z: c.innerH }), done, c, itemsById);
+    if (st.ok) { b.z = st.z; b.invalid = false; }
+    else { b.z = 0; b.invalid = true; }   // 没有任何支撑就掉到地上，标红让人看见
+    done.push(b);
+  });
+}
+
+function refreshAll() {
+  // 先做重力结算：拖走/删掉下面那只之后，上面的箱子必须落下来，不能悬空
+  if (skipSettle) skipSettle = false;   // 智能计算铺好的位置不要再按手工规则重排
+  else resettleAll();
+  // 模型变了：删掉多余网格，同步剩下的
+  const ids = new Set(model.boxes.map((b) => b.uid));
+  meshes.forEach((m, uid) => {
+    if (!ids.has(uid)) { scene.remove(m); meshes.delete(uid); }
+  });
+  model.boxes.forEach((b) => syncMesh(b));
+  paintSelection();
+  paintCount();
+  renderSkuList();
+}
+
+/** 切柜型后重新校验：越界或过不了门高的标红，箱子不删 */
+function revalidate() {
+  const bad = [];
+  model.boxes.forEach((b) => {
+    const ok = CL.manual.inBounds(b, c);
+    b.invalid = !ok;
+    if (!ok) bad.push(b);
+  });
+  paintSelection();
+  bad.forEach((b) => {
+    const m = meshes.get(b.uid);
+    if (m) m.material = BAD_MAT;
+  });
+  return bad;
+}
+
+function paintCount() {
+  // 顶部不再显示计数（用户要求移除）；状态栏与清单里已经有数量，这里只做兜底
+  const el = document.getElementById('count');
+  if (!el) return;
+  const cs = CL.manualModel.counts(model);
+  el.textContent = cs.map((x) => x.name + ' ' + x.placed + '/' + x.want).join(' · ') +
+    (selected ? ' · 已选中 #' + selected : '');
+}
+
+function doRotate(axis) {
+  if (!selected) { say('先点选一只箱子', true); return; }
+  const r = CL.manualModel.rotate(model, selected, axis);
+  if (!r.ok) { say('转不了：' + (r.message || r.reason), true); return; }
+  refreshAll();
+  say('已绕 ' + axis.toUpperCase() + ' 转 90°，高 ' + Math.round(r.box.h) + 'mm');
+}
+
+function doCopy() {
+  if (!selected) { say('先点选一只箱子', true); return; }
+  const r = CL.manualModel.copy(model, selected);
+  if (!r.ok) { say('复制不了：' + (r.message || r.reason), true); return; }
+  selected = r.box.uid;
+  refreshAll();
+  say('已复制一只（共 ' + model.boxes.length + ' 只）');
+}
+
+function doUndo() {
+  const r = CL.manualModel.undo(model);
+  if (!r.ok) { say('没有可撤销的操作', true); return; }
+  if (!model.boxes.some((b) => b.uid === selected)) selected = null;
+  refreshAll();
+  say('已撤销（共 ' + model.boxes.length + ' 只）');
+}
+
+['x', 'y', 'z'].forEach((axis) => {
+  document.getElementById('r' + axis).addEventListener('click', () => doRotate(axis));
+});
+document.getElementById('cp').addEventListener('click', doCopy);
+document.getElementById('pair').addEventListener('click', doPair);
+document.getElementById('smart').addEventListener('click', doSmartPack);
+
+/**
+ * 智能计算：把清单里的纸箱全部交给自动排布引擎算一遍，直接把最优方案铺到柜里。
+ * 只展示结果（3D 图），不展示计算过程。
+ */
+function doSmartPack() {
+  const rows = model.items.filter((it) => Number(it.qty) > 0);
+  if (!rows.length) { say('先在清单里填好纸箱和数量', true); return; }
+  say('智能计算中…');
+  let pack = null;
+  try {
+    pack = CL.pack.run({ container: c, rows: rows, options: {} });
+  } catch (e) {
+    say('计算出错：' + ((e && e.message) || e), true);
+    return;
+  }
+  const places = (pack && pack.placements) || [];
+  if (!places.length) { say('这一单没有可行方案：多半是箱高超过柜门，或尺寸超出柜内腔', true); return; }
+  skipSettle = true;                     // 引擎已经算好每只箱子的位置，别再按手工规则重排
+  model.boxes = places.map((p) => ({
+    skuId: p.skuId,
+    x: p.x, y: p.y, z: p.z,
+    l: p.l, w: p.w, h: p.h,
+    pose: p.pose || [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    uid: model.nextId++
+  }));
+  selected = null;
+  refreshAll();
+  const want = rows.reduce((s, it) => s + Number(it.qty), 0);
+  const loaded = model.boxes.length;
+  const rate = (pack.totals && pack.totals.fillRate) ? Math.round(pack.totals.fillRate * 1000) / 10 : null;
+  say('智能计算：装入 ' + loaded + ' 箱' +
+    (want > loaded ? '（还有 ' + (want - loaded) + ' 箱装不下）' : '（全部装下）') +
+    (rate !== null ? '｜装载率 ' + rate + '%' : '') +
+    (pack.container ? '｜' + (pack.container.name || '') : ''));
+}
+
+
+/**
+ * 定位对扣：把选中箱子翻 180° 生成配对件，扣在下件上。
+ * 角对齐是**构造出来**的：配对件与下件同外廓，x/y 直接取同一个值，四个底角必然重合；
+ * 再用 residual 复核一遍并报给用户看，不靠眼睛判断"差不多了"。
+ */
+function doPair() {
+  const b = model.boxes.find((x) => x.uid === selected);
+  if (!b) { say('先选中一只箱子再点对扣', true); return; }
+  const it = itemsById[b.skuId];
+  const sv = it && it.shapeValues;
+  if (!sv) { say('这只箱子没有几何数据，无法对扣', true); return; }
+  if (it.shape === 'rect') { say('矩形箱直接叠就行，不需要对扣', true); return; }
+  if (it.shape === 'lshape' && Math.abs(sv.wlow - sv.whigh) > 1) {
+    say('这只 L 形箱台阶不对称：W低 ' + Math.round(sv.wlow) + ' / W高 ' + Math.round(sv.whigh) +
+      '，两只对扣会互相穿插（差 ' + Math.round(Math.abs(sv.wlow - sv.whigh)) + 'mm），请用配套箱填缺口', true);
+    return;
+  }
+  // 翻转姿态与落点一律由 corner-link 算（拖动自动对扣用的是同一套，避免两边跑偏）：
+  //   L 形沿宽度镜像 + 翻 z，落 H低；斜顶沿长度镜像 + 翻 z，落 H底；x/y 与下件完全相同 → 四角重合
+  // 先试"把选中的这只翻过去扣到附近的同款箱上"——拖动自动扣不上时，用它兜底
+  {
+    const others = model.boxes.filter((o) => o.uid !== b.uid);
+    const ap = CL.cornerLink.autoPairOnDrop(b, others, c, itemsById, { tol: 1e9 });
+    if (ap.ok) {
+      model.boxes = model.boxes.map((x) => {
+        if (x.uid === b.uid) return Object.assign({}, ap.box, { uid: b.uid, pinned: true, pairedWith: ap.pairedWith });
+        if (x.uid === ap.pairedWith) return Object.assign({}, x, { paired: true });
+        return x;
+      });
+      selected = b.uid;
+      refreshAll();
+      say('已对扣：#' + b.uid + ' 翻过来扣在 #' + ap.pairedWith + ' 上｜角对齐 0/0｜落点 z=' +
+        Math.round(ap.box.z) + '｜与其它箱侵入 0mm');
+      return;
+    }
+    if (ap.reason === 'asymmetric') { say(ap.message, true); return; }
+    say('对扣没成（' + ap.reason + '：' + ap.message + '），改为新建一只配对件', true);
+  }
+  const ph = CL.cornerLink.pairPlacement(b, it);
+  if (!ph) { say('这只箱型没有可用的对扣姿态', true); return; }
+  const cand = Object.assign({}, b, ph);
+  if (cand.h > c.doorH + 1e-6) {
+    say('对扣放不下：拼合后总高 ' + Math.round(cand.h) + 'mm 超过柜门 ' + c.doorH + 'mm', true);
+    return;
+  }
+  if (!CL.manual.inBounds(cand, c)) { say('对扣放不下：超出柜内腔或门高', true); return; }
+  // 与下件必须零穿插（缺口是包住它的，不是压进去的），与其它箱也必须零穿插
+  let selfDepth = 0;
+  for (const o of model.boxes) {
+    const depth = CL.solid.overlapDepth(cand, o, it, itemsById[o.skuId], 10);
+    if (o.uid === b.uid) { selfDepth = depth; continue; }
+    if (depth > 1) {
+      say('对扣放不下：与 #' + o.uid + ' 穿插 ' + Math.round(depth) + 'mm', true);
+      return;
+    }
+  }
+  if (selfDepth > 1) {
+    say('对扣放不下：与下件穿插 ' + Math.round(selfDepth) + 'mm（台阶不对称或姿态不对）', true);
+    return;
+  }
+  cand.uid = model.nextId++;
+  cand.pinned = true;            // 对扣上件：重力结算不重算它的高度
+  cand.pairedWith = b.uid;
+  b.paired = true;
+  model.boxes.push(cand);
+  selected = cand.uid;
+  refreshAll();
+  // 复核：四角在水平方向与下件完全重合
+  const rx = Math.round((cand.x - b.x) * 1000) / 1000;
+  const ry = Math.round((cand.y - b.y) * 1000) / 1000;
+  say('已定位对扣：#' + cand.uid + ' 翻 180° 扣在 #' + b.uid + ' 上｜角对齐残差 ' + rx + ' / ' + ry +
+    ' mm（应为 0/0）｜落点 z=' + Math.round(cand.z) + '，拼合总高 ' +
+    Math.round(sv.hlow + sv.hhigh) + 'mm｜与下件穿插 ' + Math.round(selfDepth) + 'mm');
+}
+document.getElementById('un').addEventListener('click', doUndo);
+
+// 快捷键只在画布有焦点时生效，且 preventDefault，避免吃掉页面的复制
+function canvasFocused() {
+  const el = document.activeElement;
+  return el === renderer.domElement || el === document.body || el === null;
+}
+addEventListener('keydown', (ev) => {
+  if (!canvasFocused()) return;
+  const k = ev.key.toLowerCase();
+  if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.preventDefault(); doUndo(); return; }
+  if ((ev.ctrlKey || ev.metaKey) && k === 'c') { ev.preventDefault(); if (selected) say('已记录 #' + selected); return; }
+  if ((ev.ctrlKey || ev.metaKey) && k === 'v') { ev.preventDefault(); doCopy(); return; }
+  if (k === '1') { ev.preventDefault(); doRotate('x'); }
+  if (k === '2') { ev.preventDefault(); doRotate('y'); }
+  if (k === '3') { ev.preventDefault(); doRotate('z'); }
+});
+
+// 点击选中；点空白（地板/柜壁）取消选中
+renderer.domElement.addEventListener('click', () => {
+  if (lastDownUid) { selected = lastDownUid; }
+  else { selected = null; }
+  paintSelection();
+  paintCount();
+});
+let lastDownUid = null;
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  setPointer(ev);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects([...meshes.values()], false);
+  lastDownUid = hits.length ? hits[0].object.userData.uid : null;
+}, true);
+
+window.__PROTO.selfTest2 = () => {
+  const out = {};
+  const tmp = tmpModel();
+  const a = CL.manualModel.add(tmp, { skuId: 't1', x: 0, y: 0, z: 0, l: 400, w: 300, h: 300 });
+  if (!a.ok) return out;
+  const uid = a.box.uid;
+  const before = tmp.boxes.length;
+  const c1 = CL.manualModel.copy(tmp, uid);
+  const c2 = CL.manualModel.copy(tmp, uid);
+  out.copyGrew = c1.ok && c2.ok && tmp.boxes.length === before + 2;
+  out.countMatches = CL.manualModel.counts(tmp)[0].placed === tmp.boxes.length;
+  // 转最上面那只：下面的箱子顶着它时旋转当然会重叠，那是物理对，不是 bug
+  const top = tmp.boxes.slice().sort((a, b) => (b.z + b.h) - (a.z + a.h))[0];
+  const h0 = top.h;
+  const rot = CL.manualModel.rotate(tmp, top.uid, 'y');
+  out.rotated = !!rot.ok && tmp.boxes.find((b) => b.uid === top.uid).h !== h0;
+  CL.manualModel.undo(tmp); CL.manualModel.undo(tmp); CL.manualModel.undo(tmp);
+  out.undoBack = tmp.boxes.length === before;
+  return out;
+};
+
+// ---- 左栏：箱型列表 / 新建 / 往柜里加一只 ----
+let currentSku = null;
+let formShape = 'rect';
+
+function toItem(id, shapeKey, name, values, qty) {
+  const shape = CL.shapes.get(shapeKey);
+  const raw = {};
+  shape.fields.forEach((f) => {
+    raw[f.key] = String(values && values[f.key] !== undefined && values[f.key] !== '' ? values[f.key] : shape.defaults[f.key]);
+  });
+  // 自动字段先补上（L 形箱总深 = W低 + W高），后面各处读 v.W 就都是对的
+  const v = CL.shapes.derive(shapeKey, raw);
+  const bb = shape.bbox(v);
+  const n = CL.shapes.toNum;
+  const sv = shapeKey === 'lshape'
+    ? { l: n(v.L), w: bb.w, h: bb.h, wlow: n(v.Wlow), whigh: n(v.Whigh), hlow: n(v.Hlow), hhigh: n(v.Hhigh) }
+    : shapeKey === 'slope'
+      ? { l: n(v.L), w: n(v.W), h: bb.h, hlow: n(v.Hlow), hhigh: n(v.Hhigh) }
+      : { l: n(v.L), w: n(v.W), h: bb.h };
+  return {
+    id, index: model.items.length, shape: shapeKey, shapeName: shape.name,
+    name: name || shape.name, values: v, rawValues: v, bbox: bb, shapeValues: sv,
+    qty: Math.max(0, Number(qty) || 0), allowFlip: true, allowSide: true
+  };
+}
+
+function addSku(spec) {
+  const shape = CL.shapes.get(spec.shape);
+  const errs = shape.checks(spec.values || {});
+  if (errs && errs.length) return { ok: false, message: errs[0] };
+  const id = spec.id || ('s' + (model.items.length + 1) + '-' + Math.random().toString(36).slice(2, 6));
+  const it = toItem(id, spec.shape, spec.name, spec.values, spec.qty);
+  model.items.push(it);
+  model.itemsById[it.id] = it;
+  renderSkuList();
+  return { ok: true, item: it };
+}
+
+function summarise(it) {
+  const b = it.bbox;
+  let s = Math.round(b.l) + '×' + Math.round(b.w) + '×' + Math.round(b.h);
+  if (it.shape === 'lshape') s = Math.round(b.l) + '×' + Math.round(b.w) + ' · 台阶 ' + Math.round(it.shapeValues.wlow) + '/' + Math.round(it.shapeValues.whigh);
+  if (it.shape === 'slope') s = Math.round(b.l) + '×' + Math.round(b.w) + ' · 斜顶 ' + Math.round(it.shapeValues.hlow) + '/' + Math.round(b.h);
+  return s;
+}
+
+function renderSkuList() {
+  const list = document.getElementById('sku-list');
+  const empty = document.getElementById('empty');
+  const cs = CL.manualModel.counts(model);
+  empty.style.display = cs.length ? 'none' : 'block';
+  list.innerHTML = '';
+  cs.forEach((x) => {
+    const it = itemsById[x.skuId];
+    if (!it) return;
+    const row = document.createElement('div');
+    row.className = 'sku' + (currentSku === it.id ? ' on' : '');
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = '#' + colorFor(it.id).getHexString();
+    row.innerHTML =
+      '<div class="nm"><span class="dot"></span><span class="nmx"></span></div><div class="meta"></div>' +
+      '<div class="row2"><button class="btn" data-add="1">＋</button>' +
+      '<button class="btn ghost" data-edit="1">改</button>' +
+      '<button class="btn ghost" data-del="1">删</button><span class="cnt"></span></div>';
+    row.querySelector('.nmx').textContent = it.name;
+    row.querySelector('.meta').textContent = summarise(it);
+    row.querySelector('.cnt').textContent = x.placed + '/' + x.want;
+    row.querySelector('[data-add]').addEventListener('click', (ev) => { ev.stopPropagation(); addOne(it.id); });
+    row.querySelector('[data-edit]').addEventListener('click', (ev) => { ev.stopPropagation(); openEdit(it.id); });
+    row.querySelector('[data-del]').addEventListener('click', (ev) => { ev.stopPropagation(); removeSku(it.id); });
+    row.addEventListener('click', () => { currentSku = it.id; renderSkuList(); });
+    list.appendChild(row);
+  });
+}
+
+/** 删箱型：连同它已经放进柜里的箱子一起删（否则会留下没有箱型的孤儿箱） */
+function removeSku(skuId) {
+  const it = itemsById[skuId];
+  if (!it) return;
+  const placed = model.boxes.filter((b) => b.skuId === skuId).length;
+  if (placed && !confirm('「' + it.name + '」已经放进柜里 ' + placed + ' 只，删掉这个箱型会一起删掉它们，继续？')) return;
+  model.boxes = model.boxes.filter((b) => b.skuId !== skuId);
+  model.items = model.items.filter((x) => x.id !== skuId);
+  delete model.itemsById[skuId];
+  delete itemsById[skuId];
+  dropGeo(skuId);
+  if (currentSku === skuId) currentSku = null;
+  if (editingSku === skuId) { editingSku = null; document.getElementById('form').classList.remove('on'); }
+  refreshAll();
+  say('已删除箱型：' + it.name + '（同时移除 ' + placed + ' 只已放的箱子）');
+}
+
+/** 改箱型：尺寸/数量/名称都能改；已放进柜的同款箱子按新尺寸重摆，摆不下就标红 */
+function updateSku(id, values, qty, name) {
+  const it = itemsById[id];
+  if (!it) return { ok: false, message: '箱型不存在' };
+  const shape = CL.shapes.get(it.shape);
+  const errs = shape.checks(values);
+  if (errs && errs.length) return { ok: false, message: errs[0] };
+  const fresh = toItem(id, it.shape, name || it.name, values, qty);
+  fresh.index = it.index;
+  Object.assign(it, fresh);
+  dropGeo(id);
+  // 已摆的箱子换成新尺寸：能放下就留，放不下标红（不悄悄删）
+  model.boxes = model.boxes.map((b) => {
+    if (b.skuId !== id) return b;
+    const others = model.boxes.filter((x) => x.uid !== b.uid);
+    const r = CL.manual.tryPlace(
+      { skuId: id, x: b.x, y: b.y, z: b.z, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h },
+      others, c, itemsById
+    );
+    if (r.ok) return Object.assign(r.box, { uid: b.uid });
+    return Object.assign({}, b, { l: it.bbox.l, w: it.bbox.w, h: it.bbox.h, invalid: true });
+  });
+  refreshAll();
+  const bad = model.boxes.filter((b) => b.skuId === id && b.invalid).length;
+  say('已更新箱型：' + it.name + (bad ? '，其中 ' + bad + ' 只按新尺寸放不下，已标红' : ''));
+  return { ok: true, item: it };
+}
+
+/** 几何缓存里丢掉某个箱型的（尺寸改了必须丢，否则还按旧尺寸画） */
+function dropGeo(skuId) {
+  Array.from(geoCache.keys()).forEach((k) => { if (k.indexOf(skuId + '|') === 0) geoCache.delete(k); });
+}
+
+/** 在柜里找一个真正放得下的空位（先低后高、先近门后往里），不再一律扔到 (0,0,0) */
+function findSpot(it) {
+  const stepX = Math.max(50, Math.round(it.bbox.l / 2));
+  const stepY = Math.max(50, Math.round(it.bbox.w / 2));
+  let tries = 0;
+  for (let x = 0; x + it.bbox.l <= c.innerL + 0.5; x += stepX) {
+    for (let y = 0; y + it.bbox.w <= c.innerW + 0.5; y += stepY) {
+      if (++tries > 600) return null;
+      const r = CL.manual.tryPlace(
+        { skuId: it.id, x, y, z: 0, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h },
+        model.boxes, c, itemsById
+      );
+      if (r.ok) return r;
+    }
+  }
+  return null;
+}
+
+/** 往柜里加一只：先过门高，再找空位，最后由模型做沉降/吸附/判定 */
+function addOne(skuId) {
+  const it = itemsById[skuId];
+  if (!it) return;
+  if (it.bbox.h > c.doorH + 0.5) {
+    say('放不进：箱高 ' + Math.round(it.bbox.h) + 'mm 超过 ' + ctnSel.value + ' 门高 ' + c.doorH + 'mm', true);
+    return;
+  }
+  const spot = findSpot(it);
+  if (!spot) { say('放不进：柜内已没有能放下 ' + it.name + ' 的空位', true); return; }
+  const r = CL.manualModel.add(model, { skuId, x: spot.box.x, y: spot.box.y, z: spot.box.z, l: it.bbox.l, w: it.bbox.w, h: it.bbox.h });
+  if (!r.ok) { say('放不进：' + (r.message || r.reason), true); return; }
+  selected = r.box.uid;
+  currentSku = it.id;
+  refreshAll();
+  say('已放入一只 ' + it.name + '（x=' + Math.round(r.box.x) + ' y=' + Math.round(r.box.y) + '），共 ' + model.boxes.length + ' 只');
+}
+
+/** 打开表单：editingId 为 null 是新建，否则是改旧箱型 */
+let editingSku = null;
+function paintForm(prefill) {
+  const shape = CL.shapes.get(formShape);
+  document.querySelectorAll('#shapes button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.shape === formShape);
+  });
+  const box = document.getElementById('fields');
+  box.innerHTML = '';
+  shape.fields.forEach((f) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'fld';
+    const lb = document.createElement('label');
+    lb.textContent = f.auto ? f.label + '（自动）' : f.label;
+    const inp = document.createElement('input');
+    inp.dataset.key = f.key;
+    inp.value = prefill && prefill[f.key] != null ? prefill[f.key] : shape.defaults[f.key];
+    inp.setAttribute('inputmode', 'numeric');
+    if (f.auto) {
+      // 自动字段：只读，由「低段深 + 高段深」实时算出，免去手填对不上
+      inp.readOnly = true;
+      inp.style.opacity = '0.75';
+      inp.title = '自动计算：W低 + W高';
+    }
+    wrap.appendChild(lb); wrap.appendChild(inp);
+    box.appendChild(wrap);
+  });
+  syncAutoFields();
+}
+
+/** 把自动字段按当前输入实时补上（L 形箱：总深 W = W低 + W高） */
+function syncAutoFields() {
+  const shape = CL.shapes.get(formShape);
+  const inputs = Array.from(document.querySelectorAll('#fields input'));
+  const values = {};
+  inputs.forEach((i) => { values[i.dataset.key] = i.value; });
+  const derived = CL.shapes.derive(formShape, values);
+  shape.fields.forEach((f) => {
+    if (!f.auto) return;
+    const inp = inputs.find((i) => i.dataset.key === f.key);
+    if (inp) inp.value = derived[f.key] != null ? derived[f.key] : '';
+  });
+}
+// 改「低段深 / 高段深」时，总深跟着变
+document.getElementById('fields').addEventListener('input', syncAutoFields);
+function openEdit(skuId) {
+  const it = itemsById[skuId];
+  if (!it) return;
+  editingSku = skuId;
+  formShape = it.shape;
+  const f = document.getElementById('form');
+  f.classList.add('on');
+  document.getElementById('f-err').textContent = '';
+  paintForm(it.values);
+  document.getElementById('f-name').value = it.name;
+  document.getElementById('f-qty').value = it.qty;
+  f.scrollIntoView({ block: 'nearest' });
+}
+function closeForm() {
+  document.getElementById('form').classList.remove('on');
+  editingSku = null;
+}
+
+document.getElementById('new-sku').addEventListener('click', () => {
+  const f = document.getElementById('form');
+  if (f.classList.contains('on') && editingSku === null) { closeForm(); return; }
+  editingSku = null;
+  f.classList.add('on');
+  document.getElementById('f-err').textContent = '';
+  paintForm();
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-qty').value = '10';
+});
+document.querySelectorAll('#shapes button').forEach((b) => {
+  b.addEventListener('click', () => {
+    if (editingSku) { say('改尺寸时不能换箱型，删了重建一个', true); return; }
+    formShape = b.dataset.shape;
+    paintForm();
+  });
+});
+document.getElementById('f-cancel').addEventListener('click', () => {
+  closeForm();
+});
+document.getElementById('f-save').addEventListener('click', () => {
+  const shape = CL.shapes.get(formShape);
+  const values = {};
+  document.querySelectorAll('#fields input').forEach((i) => { values[i.dataset.key] = i.value.trim(); });
+  const qty = document.getElementById('f-qty').value.trim();
+  const nameInput = document.getElementById('f-name').value.trim();
+  const errEl = document.getElementById('f-err');
+  const errs = shape.checks(values);
+  if (errs && errs.length) { errEl.textContent = errs[0]; return; }
+  if (!(Number(qty) > 0)) { errEl.textContent = '数量要大于 0'; return; }
+  if (editingSku) {
+    const r = updateSku(editingSku, values, qty, nameInput);
+    if (!r.ok) { errEl.textContent = r.message || '保存失败'; return; }
+    errEl.textContent = '';
+    currentSku = editingSku;
+    closeForm();
+    renderSkuList();
+    return;
+  }
+  const r = addSku({ shape: formShape, values, qty, name: nameInput || shape.name });
+  if (!r.ok) { errEl.textContent = r.message || '保存失败'; return; }
+  errEl.textContent = '';
+  closeForm();
+  currentSku = r.item.id;
+  renderSkuList();
+  say('已新建箱型：' + r.item.name + ' ' + summarise(r.item));
+});
+
+// Delete / Backspace 删掉选中箱
+addEventListener('keydown', (ev) => {
+  if (!canvasFocused()) return;
+  if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+  if (!selected) return;
+  ev.preventDefault();
+  const r = CL.manualModel.remove(model, selected);
+  if (!r.ok) { say('删不掉：' + (r.message || r.reason), true); return; }
+  selected = null;
+  refreshAll();
+  say('已删除一只，剩 ' + model.boxes.length + ' 只');
+});
+renderSkuList();
+
+// 把诊断数与两条验收写进页面，截图就能读到
+setTimeout(() => {
+  const s = stats();
+  const t = window.__PROTO.selfTest();
+  const t2 = window.__PROTO.selfTest2();
+  document.getElementById('stat2').textContent =
+    'children=' + s.children + ' · calls=' + s.calls + ' | 撞墙拒绝=' + (t.wallRejected ? '✓' : '✗') +
+    ' 模型未变=' + (t.modelUnchanged ? '✓' : '✗') + ' | 落箱顶=' + (t.onTopOk && t.onTopZ === 300 ? '✓' : '✗') +
+    ' | 复制+2=' + (t2.copyGrew ? '✓' : '✗') + ' 计数一致=' + (t2.countMatches ? '✓' : '✗') +
+    ' 旋转生效=' + (t2.rotated ? '✓' : '✗') + ' 撤销回原=' + (t2.undoBack ? '✓' : '✗');
+  paintCount();
+}, 900);
+</script>
 </body>
 </html>

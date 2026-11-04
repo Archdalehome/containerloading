@@ -1,7 +1,7 @@
 // 结构自检：logo、build 标记、div 配平
 const fs = require('fs');
 const path = require('path');
-const s = fs.readFileSync(path.join(__dirname, '..', 'manual-proto.html'), 'utf8');
+const s = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const count = (re) => (s.match(re) || []).length;
 console.log('logo 引用        ' + (s.includes('assets/logo.png') ? '有' : '没有'));
 console.log('build 标记       ' + count(/id="build"/g) + ' 个');
