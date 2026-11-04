@@ -303,29 +303,55 @@
       }
     }
     aligned.moved = !!(aligned.x || aligned.y);
-    if (cand.x < -EPS || cand.y < -EPS ||
-        cand.x + cand.l > c.innerL + EPS || cand.y + cand.w > c.innerW + EPS) {
-      return { ok: false, reason: 'bounds', message: '对齐后超出柜内腔', box: cand };
-    }
-    for (var j = 0; j < others.length; j++) {
-      if (M.overlaps(cand, others[j], itemsById)) {
-        return { ok: false, reason: 'overlap', message: '与 #' + others[j].uid + ' 互相侵入', box: cand, with: others[j] };
+    // 对齐只是"首选项"：贴边后可能与邻箱互相侵入（比如两只左缘对齐就重合了）。
+    // 所以要按"先对齐、后不平移"的顺序逐个试，全都过不了才报错——
+    // 不能一对齐撞上就直接判"放不下"。
+    var offX = aligned.moved ? [cand.x - box.x, 0] : [0];
+    var offY = aligned.moved ? [cand.y - box.y, 0] : [0];
+    var failure = null;
+    for (var a = 0; a < offX.length; a++) {
+      for (var bb = 0; bb < offY.length; bb++) {
+        var c2 = Object.assign({}, box, {
+          x: box.x + offX[a], y: box.y + offY[bb], z: pick.z
+        });
+        if (c2.x < -EPS || c2.y < -EPS ||
+            c2.x + c2.l > c.innerL + EPS || c2.y + c2.w > c.innerW + EPS) {
+          if (!failure) failure = { ok: false, reason: 'bounds', message: '对齐后超出柜内腔', box: c2 };
+          continue;
+        }
+        var hitBox = null;
+        for (var j = 0; j < others.length; j++) {
+          if (M.overlaps(c2, others[j], itemsById)) { hitBox = others[j]; break; }
+        }
+        if (hitBox) {
+          if (!failure) {
+            failure = {
+              ok: false, reason: 'overlap',
+              message: '与 #' + hitBox.uid + ' 互相侵入', box: c2, with: hitBox
+            };
+          }
+          continue;
+        }
+        var ct2 = contactAt(c2, others, itemsById);
+        var moved = (offX[a] !== 0 || offY[bb] !== 0);
+        return {
+          ok: true, box: c2,
+          floor: pick.z <= EPS,
+          supportZ: pick.z,
+          contact: {
+            area: Math.round(ct2.area),
+            ratio: Math.round(ct2.area / (c2.l * c2.w) * 1000) / 1000,
+            floor: ct2.floor
+          },
+          aligned: {
+            dx: r1(offX[a]), dy: r1(offY[bb]), moved: moved,
+            x: moved ? aligned.x : null, y: moved ? aligned.y : null
+          },
+          gap: r1(c2.z - pick.z)          // 必须为 0：说明"坐在面上"，不是浮着
+        };
       }
     }
-    // 复核面接触：这一层真正接触到的面积占比
-    var ct = contactAt(cand, others, itemsById);
-    return {
-      ok: true, box: cand,
-      floor: pick.z <= EPS,
-      supportZ: pick.z,
-      contact: {
-        area: Math.round(ct.area),
-        ratio: Math.round(ct.area / (cand.l * cand.w) * 1000) / 1000,
-        floor: ct.floor
-      },
-      aligned: aligned,
-      gap: r1(cand.z - pick.z)          // 必须为 0：说明"坐在面上"，不是浮着
-    };
+    return failure || { ok: false, reason: 'overlap', message: '这个位置放不下', box: box };
   }
 
   /* ---------- 对扣：翻转姿态与落点由几何定，不靠人摆 ---------- */

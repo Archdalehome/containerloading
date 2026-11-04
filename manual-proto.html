@@ -451,7 +451,15 @@ function placeGhost(ev) {
         { tol: 150 });
     }
     if (pf.ok) preview = { box: pf.box, kind: 'face', info: pf };
-    else dragging.previewFail = pf.message;
+    else {
+      // 鼠标压在斜顶箱上却叠不上去：直说物理原因，别报成"互相侵入"让人以为程序坏了
+      const ho = hoverHits.length ? hoverHits[0].object : null;
+      const hb = (ho && ho !== floor) ? model.boxes.find((x) => x.uid === ho.userData.uid) : null;
+      const hi = hb ? itemsById[hb.skuId] : null;
+      dragging.previewFail = (hi && hi.shape === 'slope')
+        ? '斜顶箱顶面是斜面、不承重：一正一倒对扣成平顶后才能往上叠，或者放到旁边'
+        : pf.message;
+    }
   }
   if (!preview) {
     // 什么也贴不上（被挡住/出柜）：保持原高度原位置，松手会报原因
