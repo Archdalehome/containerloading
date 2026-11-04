@@ -219,7 +219,8 @@ function rebuildScene() {
   door.name = 'door';
   world.add(door);
   // 相机取景：拉近一点、视线略低于中心，柜体整体上移，不被底部面板和右下按钮挡住
-  camera.position.set(L * 0.70, H * 2.1, W * 2.8);
+  // 取景距离按 -10% 缩小：柜体在画面里小一圈（模型尺寸不变，只是视觉）
+  camera.position.set(L * 0.77, H * 2.28, W * 3.08);
   camera.lookAt(0, H * 0.30, 0);
   frameCamera();
 }
@@ -278,7 +279,8 @@ function syncMesh(b) {
 }
 
 // 相机：斜上方看整柜（rebuildScene 里会按柜型重新取景，这里只是初值）
-camera.position.set(L * 0.70, H * 2.1, W * 2.8);
+// 取景距离按 -10% 缩小：柜体在画面里小一圈（模型尺寸不变，只是视觉）
+  camera.position.set(L * 0.77, H * 2.28, W * 3.08);
 camera.lookAt(0, H * 0.30, 0);
 frameCamera();
 
