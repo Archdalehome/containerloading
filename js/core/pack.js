@@ -2006,15 +2006,11 @@
     };
   }
 
-  /**
-   * 单一 SKU 的"列装箱"最优解：把柜宽×柜高看成一列，一列能塞 c 个、占柜长 fx。
-   * 这就是"用最短柜长装够 q 个"的完全背包（可混用不同姿态的列），给出可证明的最短柜长。
-   * 只处理单 SKU；混装交给主引擎。没有可行解返回 null。
-   */
-  function optimalColumns(rows, container) {
-    var list = (rows || []).filter(function (r) { return S.toNum(r.qty) > 0; });
-    if (list.length !== 1 || !container) return null;
-    var r = list[0];
+  /* ---------- 列装箱（单 SKU 精确 + 多 SKU 近似）---------- */
+
+  /** 由一行清单构造列 DP 用的 item（列最优与分箱列块共用同一套几何） */
+  function columnItemOf(r, index) {
+    if (!r) return null;
     var shape = S.get(r.shape);
     var v = r.values || {};
     var bb = shape.bbox(v);
@@ -2024,21 +2020,38 @@
       : r.shape === 'slope'
         ? { l: S.toNum(v.L), w: S.toNum(v.W), h: bb.h, hlow: S.toNum(v.Hlow), hhigh: S.toNum(v.Hhigh) }
         : { l: S.toNum(v.L), w: S.toNum(v.W), h: bb.h };
-    var item = {
-      id: r.id, index: 0, shape: r.shape, name: r.name || r.id,
+    return {
+      id: r.id, index: index || 0, shape: r.shape, name: r.name || r.id,
       values: v, bbox: bb, shapeValues: sv,
       qty: S.toNum(r.qty), loaded: 0,
       allowFlip: r.allowFlip !== false, allowSide: r.allowSide !== false
     };
-    var q = S.toNum(r.qty);
-    if (!(q > 0)) return null;
-    // L 形/斜顶躺倒后底面是台阶或斜面，站不住：只允许"竖直轴仍朝上"的姿态。
-    // 矩形箱没这个限制。这条过滤很关键——否则算出的"更短柜长"是悬空的假方案。
+  }
+
+  function kindOfPose(p) {
+    return p.side ? 'side' : (p.flip ? 'flip' : 'normal');
+  }
+
+  /**
+   * 一个 SKU 的所有"列型"：一列占柜长 cost、宽向 ny 道、能塞 c 只。
+   *
+   * 列型怎么来的：
+   *   矩形箱 —— 平顶平底，层数直接取整 floor(内高/层厚)
+   *   L 形/斜顶 —— 单只顶面站不住（台阶/斜面），所以一列的组成只有两种东西：
+   *                k 个「一正一倒」的对扣平顶块 + 最上面最多 1 只单只（单只上方不能再压）
+   *
+   * 只用"竖直轴朝上"的姿态：L 形/斜顶躺倒后底面是台阶或斜面，现实里放不住，
+   * 算了也是悬空的假方案。
+   */
+  function columnTypesFor(item, container) {
+    if (!item) return [];
+    var bb = item.bbox;
+    var sv = item.shapeValues;
     var poses = posesFor(item).filter(function (p) {
       if (p.thickness > container.doorH + 1e-6) return false;
       return item.shape === 'rect' ? true : p.vertical === 2;
     });
-    if (!poses.length) return null;
+    if (!poses.length) return [];
     var cols = [];
     var asymL = item.shape === 'lshape' && Math.abs(sv.wlow - sv.whigh) > 1;
     // 每个姿态的"倒扣上件"：必须沿剖面轴镜像 + 翻 z，否则实体互相插入。
@@ -2065,16 +2078,12 @@
       if (ny <= 0) return;
       var cost = p.fx;
       if (item.shape === 'rect') {
-        // 矩形箱平顶平底：层数直接取整，不用考虑对扣
         var layers = Math.floor((container.innerH + 1e-6) / p.thickness);
         if (layers > 0) {
           cols.push({ pose: p, ny: ny, layers: layers, k: 0, single: false, pair: false, c: ny * layers, cost: cost });
         }
         return;
       }
-      // L 形/斜顶：单只顶面站不住（台阶/斜面），所以一列只能由这两种东西组成：
-      //   k 个"一正一倒"的平顶块，最上面最多再放 1 只单只（单只上方不能再压）。
-      // 高度只受柜内高限制；单只自己的高度过门高，在姿态过滤里已经挡掉了。
       var fp = pairPoseOf(p);
       if (!fp) {
         // 没有合法对扣姿态：这一列只能在地面放一层单只
@@ -2084,7 +2093,6 @@
       var pairTh = sv.hlow + bb.h;
       var maxK = Math.floor((container.innerH + 1e-6) / pairTh);
       for (var kk = 0; kk <= maxK; kk++) {
-        var baseH = kk * pairTh;
         var withSingle = kk * pairTh + p.thickness <= container.innerH + 1e-6;
         var cap = 2 * kk + (withSingle ? 1 : 0);
         if (cap <= 0) continue;
@@ -2094,7 +2102,114 @@
         });
       }
     });
-    cols = cols.filter(function (c) { return c.c > 0; });
+    return cols.filter(function (t) { return t.c > 0; });
+  }
+
+  /**
+   * 把「一列」落成真实摆放，最多放 n 只（n ≤ 列型容量）。
+   * 关键：对扣块没排满时不许在上面放单只——否则单只会凭空悬在缺口上方。
+   */
+  function emitColumn(item, t, x, n) {
+    var p = t.pose;
+    var bb = item.bbox;
+    var sv = item.shapeValues;
+    var out = [];
+    var left = n;
+    var rot = Math.abs(p.fx - bb.l) < 1e-6 ? 0 : 90;
+    function push(y, z, pose, layer, kind, col, row) {
+      out.push({
+        skuId: item.id, index: item.index || 0, col: col, row: row,
+        x: x, y: y, z: z, l: p.fx, w: p.fy, h: p.thickness,
+        rot: rot, layer: layer, pose: pose, kind: kind
+      });
+      left--;
+    }
+    if (t.pair) {
+      var fp = t.flipPose;
+      if (!fp) return out;
+      var lowers = 0;
+      for (var li = 0; li < t.k && left > 0; li++) {
+        for (var yi = 0; yi < t.ny && left > 0; yi++) {
+          var zBase = li * t.pairTh;
+          var yBase = yi * p.fy;
+          push(yBase, zBase, p.m, li, 'pair-lower', yi + 1, li + 1);
+          lowers++;
+          if (left > 0) {
+            push(yBase, zBase + sv.hlow, fp.m, li,
+              item.shape === 'lshape' ? 'pair-upper-l' : 'pair-upper', yi + 1, li + 1);
+          }
+        }
+      }
+      // 单只只能压在"排满的"对扣块顶上
+      if (t.single && left > 0 && lowers === t.k * t.ny) {
+        var zTop = t.k * t.pairTh;
+        for (var ys = 0; ys < t.ny && left > 0; ys++) {
+          push(ys * p.fy, zTop, p.m, t.k, kindOfPose(p), ys + 1, t.k + 1);
+        }
+      }
+      return out;
+    }
+    for (var l2 = 0; l2 < t.layers && left > 0; l2++) {
+      for (var y2 = 0; y2 < t.ny && left > 0; y2++) {
+        push(y2 * p.fy, l2 * p.thickness, p.m, l2, kindOfPose(p), y2 + 1, l2 + 1);
+      }
+    }
+    if (t.single && left > 0) {
+      var zs = t.layers * p.thickness;
+      for (var y3 = 0; y3 < t.ny && left > 0; y3++) {
+        push(y3 * p.fy, zs, p.m, t.layers, kindOfPose(p), y3 + 1, t.layers + 1);
+      }
+    }
+    return out;
+  }
+
+  /** 把摆放组成一份 pack（列最优与分箱列块共用） */
+  function packFromColumnPlacements(items, placements, container, rows) {
+    var byId = {};
+    items.forEach(function (it) { byId[it.id] = it; });
+    var net = 0;
+    var perSku = {};
+    placements.forEach(function (p) {
+      var it = byId[p.skuId];
+      if (!it) return;
+      if (!perSku[p.skuId]) perSku[p.skuId] = 0;
+      perSku[p.skuId]++;
+      net += S.get(it.shape).volume(it.values || {});
+    });
+    items.forEach(function (it) { it.loaded = perSku[it.id] || 0; });
+    var length = 0;
+    placements.forEach(function (p) { length = Math.max(length, p.x + p.l); });
+    var containerVolume = container.innerL * container.innerW * container.innerH;
+    var want = 0;
+    (rows || []).forEach(function (r) { want += S.toNum(r.qty) || 0; });
+    return {
+      ok: true, container: container, rows: rows, items: items,
+      placements: placements, layers: [],
+      usedHeight: placements.reduce(function (m, p) { return Math.max(m, p.z + p.h); }, 0),
+      containerVolume: containerVolume,
+      totals: {
+        loadedCount: placements.length,
+        remainingCount: Math.max(0, want - placements.length),
+        netVolume: net,
+        fillRate: containerVolume ? net / containerVolume : 0
+      },
+      length: length
+    };
+  }
+
+  /**
+   * 单一 SKU 的"列装箱"最优解：把柜宽×柜高看成一列，一列能塞 c 个、占柜长 cost。
+   * 这就是"用最短柜长装够 q 个"的完全背包（可混用不同列型），给出可证明的最短柜长。
+   * 只处理单 SKU；混装交给 runColumnMix。没有可行解返回 null。
+   */
+  function optimalColumns(rows, container) {
+    var list = (rows || []).filter(function (r) { return S.toNum(r.qty) > 0; });
+    if (list.length !== 1 || !container) return null;
+    var item = columnItemOf(list[0], 0);
+    if (!item) return null;
+    var q = item.qty;
+    if (!(q > 0)) return null;
+    var cols = columnTypesFor(item, container);
     if (!cols.length) return null;
     var INF = Infinity;
     var dp = new Array(q + 1);
@@ -2131,98 +2246,70 @@
     var x = 0;
     var left = bestK;
     picks.forEach(function (col) {
-      var p = col.pose;
-      if (col.pair) {
-        // 对扣列：每层是"下件 + 倒扣上件"，拼成平顶块后才能继续往上叠。
-        // 上件姿态必须取自本列这个姿态（横放/竖放镜像轴不同），不能沿用别的列的。
-        var fp = col.flipPose;
-        if (!fp) return;
-        for (var li2 = 0; li2 < col.layers && left > 0; li2++) {
-          for (var yi2 = 0; yi2 < col.ny && left > 0; yi2++) {
-            var zBase = li2 * col.pairTh;
-            var yBase = yi2 * p.fy;
-            placements.push({
-              skuId: item.id, index: 0, col: yi2 + 1, row: li2 + 1,
-              x: x, y: yBase, z: zBase,
-              l: p.fx, w: p.fy, h: p.thickness,
-              rot: p.fx === bb.l ? 0 : 90, layer: li2, pose: p.m, kind: 'pair-lower'
-            });
-            left--;
-            if (left > 0) {
-              placements.push({
-                skuId: item.id, index: 0, col: yi2 + 1, row: li2 + 1,
-                x: x, y: yBase, z: zBase + sv.hlow,
-                l: p.fx, w: p.fy, h: p.thickness,
-                rot: p.fx === bb.l ? 0 : 90, layer: li2, pose: fp.m,
-                kind: item.shape === 'lshape' ? 'pair-upper-l' : 'pair-upper'
-              });
-              left--;
-            }
-          }
-        }
-        // 对扣块顶上再放一只单只（单只上方不再压任何箱）：斜顶 1400+900=2300 这种组合就靠它，
-        // 否则 floor(2698/1400)=1 个块，剩下 1298mm 全浪费。
-        if (col.single && left > 0) {
-          var zTop = col.k * col.pairTh;
-          for (var ys2 = 0; ys2 < col.ny && left > 0; ys2++) {
-            placements.push({
-              skuId: item.id, index: 0, col: ys2 + 1, row: col.k + 1,
-              x: x, y: ys2 * p.fy, z: zTop,
-              l: p.fx, w: p.fy, h: p.thickness,
-              rot: p.fx === bb.l ? 0 : 90, layer: col.k, pose: p.m,
-              kind: p.side ? 'side' : (p.flip ? 'flip' : 'normal')
-            });
-            left--;
-          }
-        }
-        x += p.fx;
-        return;
-      }
-      for (var li = 0; li < col.layers && left > 0; li++) {
-        for (var yi = 0; yi < col.ny && left > 0; yi++) {
-          placements.push({
-            skuId: item.id, index: 0, col: yi + 1, row: li + 1,
-            x: x, y: yi * p.fy, z: li * p.thickness,
-            l: p.fx, w: p.fy, h: p.thickness,
-            rot: p.fx === bb.l ? 0 : 90,
-            layer: li, pose: p.m,
-            kind: p.side ? 'side' : (p.flip ? 'flip' : 'normal')
-          });
-          left--;
-        }
-      }
-      // 没有合法对扣姿态的非矩形箱：只能在地面放一层
-      if (col.single && left > 0) {
-        var zs = col.layers * p.thickness;
-        for (var ys = 0; ys < col.ny && left > 0; ys++) {
-          placements.push({
-            skuId: item.id, index: 0, col: ys + 1, row: col.layers + 1,
-            x: x, y: ys * p.fy, z: zs,
-            l: p.fx, w: p.fy, h: p.thickness,
-            rot: p.fx === bb.l ? 0 : 90, layer: col.layers, pose: p.m,
-            kind: p.side ? 'side' : (p.flip ? 'flip' : 'normal')
-          });
-          left--;
-        }
-      }
-      x += p.fx;
+      var eb = emitColumn(item, col, x, left);
+      for (var ei = 0; ei < eb.length; ei++) placements.push(eb[ei]);
+      left -= eb.length;
+      x += col.cost;
     });
-    var length = 0;
-    placements.forEach(function (p) { length = Math.max(length, p.x + p.l); });
-    var net = placements.length * shape.volume(v);
-    return {
-      ok: true, container: container, rows: rows, items: [item],
-      placements: placements, layers: [],
-      usedHeight: placements.reduce(function (m, p) { return Math.max(m, p.z + p.h); }, 0),
-      containerVolume: container.innerL * container.innerW * container.innerH,
-      totals: {
-        loadedCount: placements.length,
-        remainingCount: Math.max(0, q - placements.length),
-        netVolume: net,
-        fillRate: net / (container.innerL * container.innerW * container.innerH)
-      },
-      length: length
-    };
+    return packFromColumnPlacements([item], placements, container, rows);
+  }
+
+  /**
+   * 多 SKU 的列块装柜（近似）：把每个 SKU 的列型放到一起比"每毫米柜长能塞几只"，
+   * 每次取密度最高的那一列排到柜长末尾，直到柜长用尽或没有可放的列。
+   *
+   * 为什么要它：原来混装只靠贪心主循环和 48 个枚举方案，大箱子少数量时容易摊得很长
+   * （实测 L 形 30 只在 20GP 里：主引擎只装 9 只，列块能装 24 只）。
+   * 它是候选之一，由智能计算按"装得多优先"排名选，不用它替换任何现有路径。
+   */
+  function runColumnMix(rows, container) {
+    var list = (rows || []).filter(function (r) { return S.toNum(r.qty) > 0; });
+    if (list.length < 2 || !container) return null;
+    var items = [];
+    for (var i = 0; i < list.length; i++) {
+      var it = columnItemOf(list[i], i);
+      if (it && it.qty > 0) items.push(it);
+    }
+    if (items.length < 2) return null;
+    var typesById = {};
+    var remaining = {};
+    items.forEach(function (it) {
+      typesById[it.id] = columnTypesFor(it, container);
+      remaining[it.id] = it.qty;
+    });
+    var placements = [];
+    var x = 0;
+    var guard = 0;
+    while (guard++ < 20000) {
+      var best = null;
+      for (var a = 0; a < items.length; a++) {
+        var it = items[a];
+        var rem = remaining[it.id];
+        if (!(rem > 0)) continue;
+        var tys = typesById[it.id] || [];
+        for (var b = 0; b < tys.length; b++) {
+          var t = tys[b];
+          if (x + t.cost > container.innerL + 1e-6) continue;
+          var n = Math.min(rem, t.c);
+          if (!(n > 0)) continue;
+          // 密度 = 这一列实际塞进去的只数 / 占用的柜长；同密度取装得多、再取列短
+          var score = n / t.cost;
+          if (!best || score > best.score + 1e-12 ||
+              (Math.abs(score - best.score) <= 1e-12 && (n > best.n ||
+                (n === best.n && t.cost < best.t.cost)))) {
+            best = { it: it, t: t, n: n, score: score };
+          }
+        }
+      }
+      if (!best) break;
+      var eb = emitColumn(best.it, best.t, x, best.n);
+      if (!eb.length) break;
+      for (var e = 0; e < eb.length; e++) placements.push(eb[e]);
+      remaining[best.it.id] -= eb.length;
+      x += best.t.cost;
+    }
+    if (!placements.length) return null;
+    return packFromColumnPlacements(items, placements, container, rows);
   }
 
   /**
@@ -2242,6 +2329,7 @@
     run: run,
     runSlices: runSlices,
     optimalColumns: optimalColumns,
+    runColumnMix: runColumnMix,
     mirrorX: mirrorX,
     // 只给测试用的内部实现：条带填缝、缺口嵌合这些机制要单独验，不能拿「最优方案」去验
     runGreedy: runGreedy,

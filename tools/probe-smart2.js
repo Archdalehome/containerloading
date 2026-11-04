@@ -5,11 +5,16 @@ const C = require('../js/core/containers.js');
 const c = C.get('40HQ');
 
 const qty = Number(process.argv[2] || 30);
-const rows = [{
-  id: 'r1', shape: 'lshape', name: 'L形箱', qty: String(qty),
-  values: { L: 2300, Wlow: 500, Whigh: 440, Hlow: 450, Hhigh: 650 },
-  allowFlip: true, allowSide: true
-}];
+const rows = process.argv[3] === 'mix'
+  ? [
+      { id: 'r1', shape: 'lshape', name: 'L形箱', qty: String(qty), values: { L: 2300, Wlow: 500, Whigh: 440, Hlow: 450, Hhigh: 650 }, allowFlip: true, allowSide: true },
+      { id: 'r2', shape: 'rect', name: '小箱', qty: '100', values: { L: 600, W: 400, H: 400 }, allowFlip: true, allowSide: true }
+    ]
+  : [{
+      id: 'r1', shape: 'lshape', name: 'L形箱', qty: String(qty),
+      values: { L: 2300, Wlow: 500, Whigh: 440, Hlow: 450, Hhigh: 650 },
+      allowFlip: true, allowSide: true
+    }];
 
 const t0 = Date.now();
 const nOf = (pk) => (pk && pk.totals && pk.totals.loadedCount) || 0;
@@ -31,6 +36,8 @@ const addCand = (pk, tag) => {
 addCand(P.runSlices({ container: c, rows, options: {} }), 'slices');
 const oc = P.optimalColumns(rows, c);
 if (oc && P.validatePhysics(oc).length === 0) addCand(oc, 'colDP');
+const cm = P.runColumnMix(rows, c);
+if (cm && P.validatePhysics(cm).length === 0) addCand(cm, 'mixDP');
 const plans = P.runPlans({ container: c, rows, options: {} });
 (plans.ranked || []).forEach((p, i) => { if (p.valid && !p.gated && p.pack) addCand(p.pack, 'plan#' + i); });
 addCand(P.run({ container: c, rows, options: {} }), 'run');

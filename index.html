@@ -925,6 +925,10 @@ function doSmartPack() {
     // 避免把"悬空的更短方案"当最优（L 形顶面有台阶，必须成对才站得住）
     const oc = CL.pack.optimalColumns(rows, c);
     if (oc && (CL.pack.validatePhysics(oc) || []).length === 0) addCand(oc, null, '对扣列最优');
+    // 多 SKU 的列块装柜：每个箱型的列型一起比"每毫米柜长能塞几只"，按密度往柜长方向铺。
+    // 混装里大箱子少数量时，贪心主循环容易摊成 12m；这条路实测能压到 6~7m（同样 0 物理错误）。
+    const cm = CL.pack.runColumnMix(rows, c);
+    if (cm && (CL.pack.validatePhysics(cm) || []).length === 0) addCand(cm, null, '分箱列块');
     if (cands.length) cands[0].boxes = nOf(cands[0].pack);
     const plans = CL.pack.runPlans({ container: c, rows: rows, options: {} });
     (plans.ranked || []).forEach((p) => {

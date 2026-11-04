@@ -88,4 +88,23 @@ ok('矩形箱列最优不劣于主引擎（同箱数下柜长更短或持平）'
     '列最优柜长 ' + oc.length + ' 不应比主引擎 ' + refLen + ' 长出太多');
 });
 
+ok('混装列块：大箱 + 小箱能全部装下，柜长明显短于主引擎，物理校验 0 错误', () => {
+  const rows = [
+    { id: 'a', shape: 'lshape', name: 'L形大件', qty: '20', values: { L: 2300, Wlow: 500, Whigh: 440, Hlow: 450, Hhigh: 650 }, allowFlip: true, allowSide: true },
+    { id: 'b', shape: 'rect', name: '小箱', qty: '100', values: { L: 600, W: 400, H: 400 }, allowFlip: true, allowSide: true }
+  ];
+  const mix = P.runColumnMix(rows, c40);
+  assert.ok(mix, '混装列块应有解');
+  assert.strictEqual(mix.totals.loadedCount, 120, '20 + 100 应该在 40HQ 里全部装下');
+  assert.strictEqual(P.validatePhysics(mix).length, 0, '物理校验必须 0 错误');
+  assert.ok(mix.length <= c40.innerL + 1, '柜长 ' + mix.length + ' 不应超过柜内长');
+  const ref = P.run({ container: c40, rows: rows, options: {} });
+  assert.ok(mix.totals.loadedCount >= ref.totals.loadedCount,
+    '混装列块装 ' + mix.totals.loadedCount + ' 只，不应少于主引擎 ' + ref.totals.loadedCount);
+});
+
+ok('混装列块：单 SKU 交给列最优，不重复算', () => {
+  assert.strictEqual(P.runColumnMix(lshapeRows(10), c40), null, '单 SKU 时 runColumnMix 应返回 null');
+});
+
 console.log('\n' + pass + ' 通过，0 失败\n');
