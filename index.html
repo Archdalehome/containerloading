@@ -870,11 +870,9 @@ function doSmartPack() {
   say('智能计算中…');
   let pack = null;
   try {
-    // 切片方案（现场装法）与引擎最优方案都算一份：先比箱数，箱数相同再比"柜长占用"。
-    // 之前无条件优先切片，导致 L 形箱全按正放沿柜长铺开（11.5m），
-    // 而引擎的侧放方案只要两层就装完、柜长占用小得多。
-    const sliced = CL.pack.runSlices({ container: c, rows: rows, options: {} });
-    const plain = CL.pack.run({ container: c, rows: rows, options: {} });
+    // 规则（用户定）：先把能装的都装上；箱数相同时用"最省空间"的那份布局——
+    // 也就是柜长方向占用最小、余量都留在柜门侧，一眼就能看出货不够。
+    // 所以把 48 个方案 + 切片方案都摆出来，按 (箱数↓, 柜长占用↑) 选。
     const nOf = (pk) => (pk && pk.totals && pk.totals.loadedCount) || 0;
     const lenOf = (pk) => {
       const ps = (pk && pk.placements) || [];
@@ -882,9 +880,18 @@ function doSmartPack() {
       for (const p of ps) m = Math.max(m, p.x + p.l);
       return m;
     };
-    pack = plain;
-    if (sliced && nOf(sliced) > nOf(plain)) pack = sliced;
-    else if (sliced && nOf(sliced) === nOf(plain) && lenOf(sliced) < lenOf(plain) - 1) pack = sliced;
+    const cands = [];
+    const sliced = CL.pack.runSlices({ container: c, rows: rows, options: {} });
+    if (sliced) cands.push({ boxes: nOf(sliced), len: lenOf(sliced), pack: sliced });
+    const plans = CL.pack.runPlans({ container: c, rows: rows, options: {} });
+    (plans.ranked || []).forEach((p) => {
+      if (!p.valid || p.gated || !p.pack) return;
+      cands.push({ boxes: p.boxes, len: lenOf(p.pack), pack: p.pack });
+    });
+    const plain = CL.pack.run({ container: c, rows: rows, options: {} });
+    if (plain) cands.push({ boxes: nOf(plain), len: lenOf(plain), pack: plain });
+    cands.sort((a, b) => (b.boxes - a.boxes) || (a.len - b.len));
+    pack = cands.length ? cands[0].pack : plain;
   } catch (e) {
     say('计算出错：' + ((e && e.message) || e), true);
     return;
