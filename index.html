@@ -810,7 +810,12 @@ function doSmartPack() {
   say('智能计算中…');
   let pack = null;
   try {
-    pack = CL.pack.run({ container: c, rows: rows, options: {} });
+    // 先按"一片装满再挪下一片"排（现场装法）；万一比引擎的最优方案装得少，就用引擎的
+    const sliced = CL.pack.runSlices({ container: c, rows: rows, options: {} });
+    const plain = CL.pack.run({ container: c, rows: rows, options: {} });
+    const plainN = (plain && plain.totals && plain.totals.loadedCount) || 0;
+    const sliceN = (sliced && sliced.totals && sliced.totals.loadedCount) || 0;
+    pack = (sliced && sliceN >= plainN) ? sliced : plain;
   } catch (e) {
     say('计算出错：' + ((e && e.message) || e), true);
     return;

@@ -1863,6 +1863,99 @@
   }
 
   /**
+   * 按切片装柜：一片装满（横向铺满 + 堆到顶）再挪下一片，符合现场习惯。
+   *
+   * 做法：把柜长切成一片一片，每片当成一个"短柜"交给贪心算法内部排满，
+   * 排完整片把 x 偏移平移过去，再推进到下一片。这样斜顶/L 形也能在自己的片里
+   * 先对扣成层再堆高，而不是先沿柜长平铺一层。
+   *
+   * 返回结构与 runGreedy 一致（placements / totals / container），供上层直接使用。
+   */
+  function runSlices(state) {
+    var c0 = state.container || {};
+    var rows = (state.rows || []).filter(function (r) {
+      var q = S.toNum(r.qty);
+      return Number.isFinite(q) && q > 0;
+    });
+    if (!rows.length) return null;
+    var left = rows.map(function (r) { return { row: r, qty: S.toNum(r.qty) }; });
+    var placements = [];
+    var xOffset = 0;
+    var guard = 0;
+    while (xOffset < c0.innerL - 1 && guard++ < 500) {
+      var alive = left.filter(function (e) { return e.qty > 0; });
+      if (!alive.length) break;
+      var lens = alive.map(function (e) {
+        var v = e.row.values || {};
+        var l = S.toNum(v.L);
+        return Number.isFinite(l) && l > 0 ? l : 600;
+      });
+      var sliceL = Math.min(c0.innerL - xOffset, Math.max(100, Math.min.apply(null, lens)));
+      var sub = Object.assign({}, c0, { innerL: sliceL });
+      var subRows = alive.map(function (e) {
+        return Object.assign({}, e.row, { qty: e.qty });
+      });
+      var part = runGreedy({ container: sub, rows: subRows, options: state.options || {} });
+      var ps = part.placements || [];
+      if (!ps.length) break;
+      var maxX = 0;
+      ps.forEach(function (p) {
+        p.x += xOffset;
+        placements.push(p);
+        maxX = Math.max(maxX, p.x + p.l - xOffset);
+        for (var i = 0; i < left.length; i++) {
+          if (left[i].row.id === p.skuId && left[i].qty > 0) { left[i].qty--; break; }
+        }
+      });
+      xOffset += maxX > 0 ? maxX : sliceL;
+    }
+    // 组装结果：净体积、装载率按实际装入的箱子算
+    var netVolume = 0;
+    placements.forEach(function (p) {
+      var r = null;
+      for (var i = 0; i < rows.length; i++) if (rows[i].id === p.skuId) { r = rows[i]; break; }
+      if (!r) return;
+      var shape = S.get(r.shape);
+      netVolume += shape.volume(r.values || {});
+    });
+    var containerVolume = c0.innerL * c0.innerW * c0.innerH;
+    var want = rows.reduce(function (s, r) { return s + S.toNum(r.qty); }, 0);
+    // items：物理校验和界面统计都要用（形状、外接框、已装数量）
+    var items = rows.map(function (r, idx) {
+      var shape = S.get(r.shape);
+      var v = r.values || {};
+      var bb = shape.bbox(v);
+      var sv = r.shape === 'lshape'
+        ? { l: S.toNum(v.L), w: bb.w, h: bb.h, wlow: S.toNum(v.Wlow), whigh: S.toNum(v.Whigh), hlow: S.toNum(v.Hlow), hhigh: S.toNum(v.Hhigh) }
+        : r.shape === 'slope'
+          ? { l: S.toNum(v.L), w: S.toNum(v.W), h: bb.h, hlow: S.toNum(v.Hlow), hhigh: S.toNum(v.Hhigh) }
+          : { l: S.toNum(v.L), w: S.toNum(v.W), h: bb.h };
+      var loaded = placements.filter(function (p) { return p.skuId === r.id; }).length;
+      return {
+        id: r.id, index: idx, shape: r.shape, name: r.name || r.id,
+        values: v, bbox: bb, shapeValues: sv,
+        qty: S.toNum(r.qty), loaded: loaded, allowFlip: r.allowFlip !== false, allowSide: r.allowSide !== false
+      };
+    });
+    return {
+      ok: true,
+      container: c0,
+      rows: rows,
+      items: items,
+      placements: placements,
+      layers: [],
+      usedHeight: placements.reduce(function (m, p) { return Math.max(m, p.z + p.h); }, 0),
+      containerVolume: containerVolume,
+      totals: {
+        loadedCount: placements.length,
+        remainingCount: Math.max(0, want - placements.length),
+        netVolume: netVolume,
+        fillRate: containerVolume ? netVolume / containerVolume : 0
+      }
+    };
+  }
+
+  /**
    * 让布局从"最里面（柜头）"开始长，而不是从柜门开始。
    * 现场装柜必须先把深入端装满，柜门附近留到最后——否则先堆在门口，人进不去、里面也装不了。
    * 做法是把整份布局沿长度镜像（反射是等距变换，外接框不相交的关系不变），
@@ -1877,6 +1970,7 @@
 
   NS.pack = {
     run: run,
+    runSlices: runSlices,
     mirrorX: mirrorX,
     // 只给测试用的内部实现：条带填缝、缺口嵌合这些机制要单独验，不能拿「最优方案」去验
     runGreedy: runGreedy,
